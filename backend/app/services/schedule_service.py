@@ -65,12 +65,14 @@ def get_free_slots(
     working_hours_start: time,
     working_hours_end: time,
     buffer_minutes: int = 10,
+    min_duration_minutes: int = 0,
 ) -> List[Interval]:
     """Compute free time slots within daily working-hour windows.
 
     Blocking engagements are expanded by `buffer_minutes` on each side, merged
     per day, then inverted against that day's working-hour window (clipped to
     the overall [start_range, end_range]) to yield the resulting free slots.
+    Slots shorter than `min_duration_minutes` are dropped from the result.
     """
     if start_range >= end_range:
         raise ValueError("start_range must be before end_range")
@@ -115,5 +117,9 @@ def get_free_slots(
                 free_slots.append(Interval(cursor, day_end))
 
         current_day += timedelta(days=1)
+
+    if min_duration_minutes > 0:
+        min_duration = timedelta(minutes=min_duration_minutes)
+        free_slots = [slot for slot in free_slots if slot.end - slot.start >= min_duration]
 
     return free_slots

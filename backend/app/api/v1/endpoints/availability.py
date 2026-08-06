@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from datetime import date, datetime, time
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
 
 from app.db.database import get_session
@@ -6,8 +8,7 @@ from app.db.models import Engagement
 from app.schemas.schedule import (
     ConflictCheckRequest,
     ConflictCheckResponse,
-    FreeSlot,
-    FreeSlotsRequest,
+    FreeSlotItem,
     FreeSlotsResponse,
 )
 from app.services.schedule_service import check_conflict, get_free_slots
@@ -15,20 +16,59 @@ from app.services.schedule_service import check_conflict, get_free_slots
 router = APIRouter()
 
 
-@router.post("/free-slots", response_model=FreeSlotsResponse)
+@router.get("/free-slots", response_model=FreeSlotsResponse)
 def free_slots(
-    payload: FreeSlotsRequest, session: Session = Depends(get_session)
+    date_from: date = Query(..., description="Start of the search range (inclusive)."),
+    date_to: date = Query(..., description="End of the search range (inclusive)."),
+    day_start_hour: time = Query(default=time(9, 0), description="Daily working-hours start."),
+    day_end_hour: time = Query(default=time(18, 0), description="Daily working-hours end."),
+    min_duration_minutes: int = Query(
+        default=30, ge=1, description="Minimum length a free slot must have to be returned."
+    ),
+    session: Session = Depends(get_session),
 ) -> FreeSlotsResponse:
-    engagements = session.exec(select(Engagement)).all()
+    if date_from > date_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_from must not be after date_to",
+        )
+    if day_start_hour >= day_end_hour:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="day_start_hour must be before day_end_hour",
+        )
+
+    start_range = datetime.combine(date_from, time.min)
+    end_range = datetime.combine(date_to, time.max)
+
+    blocking_engagements = session.exec(
+        select(Engagement).where(
+            Engagement.is_blocking == True,  # noqa: E712
+            Engagement.start_time < end_range,
+            Engagement.end_time > start_range,
+        )
+    ).all()
+
     slots = get_free_slots(
-        start_range=payload.start_range,
-        end_range=payload.end_range,
-        existing_engagements=engagements,
-        working_hours_start=payload.working_hours_start,
-        working_hours_end=payload.working_hours_end,
-        buffer_minutes=payload.buffer_minutes,
+        start_range=start_range,
+        end_range=end_range,
+        existing_engagements=blocking_engagements,
+        working_hours_start=day_start_hour,
+        working_hours_end=day_end_hour,
+        buffer_minutes=0,
+        min_duration_minutes=min_duration_minutes,
     )
-    return FreeSlotsResponse(slots=[FreeSlot(start=slot.start, end=slot.end) for slot in slots])
+
+    return FreeSlotsResponse(
+        slots=[
+            FreeSlotItem(
+                start_time=slot.start,
+                end_time=slot.end,
+                duration_minutes=int((slot.end - slot.start).total_seconds() // 60),
+            )
+            for slot in slots
+        ]
+    )
 
 
 @router.post("/check-conflict", response_model=ConflictCheckResponse)
