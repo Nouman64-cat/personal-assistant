@@ -66,3 +66,20 @@ export interface FreeSlotsParams {
   day_end_hour?: string;
   min_duration_minutes?: number;
 }
+
+/**
+ * The user's saved working hours (e.g. "9 AM to 6 PM, Asia/Karachi"), used as
+ * the default window for availability. `day_start_hour`/`day_end_hour` are
+ * "HH:MM:SS" and are meant to be interpreted in `timezone`.
+ */
+export interface ShiftSettings {
+  day_start_hour: string;
+  day_end_hour: string;
+  timezone: string;
+}
+
+export interface ShiftSettingsInput {
+  day_start_hour: string;
+  day_end_hour: string;
+  timezone: string;
+}

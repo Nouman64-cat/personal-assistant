@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CalendarClock, Loader2, RefreshCw } from "lucide-react";
 
 import { ApiError, getFreeSlots, listEngagements } from "@/lib/api";
-import type { Engagement, FreeSlotItem } from "@/lib/types";
+import type { Engagement, FreeSlotItem, ShiftSettings } from "@/lib/types";
 import {
   CATEGORY_BLOCK_CLASSES,
   CATEGORY_LABELS,
@@ -16,6 +16,7 @@ import {
   parseDateKey,
   parseNaiveIso,
   toDateKey,
+  toUtcBoundary,
 } from "@/lib/utils";
 
 const MAX_RENDERED_DAYS = 31;
@@ -23,6 +24,13 @@ const MAX_RENDERED_DAYS = 31;
 interface FreeSlotViewerProps {
   /** Bump this to force a refetch (e.g. after new engagements were added elsewhere). */
   refreshSignal?: number;
+  /**
+   * The saved shift, used to seed the initial day-start/day-end filters. The
+   * parent should remount this component (e.g. via a `key` tied to the
+   * shift's save version) when the shift changes, so this only needs to be
+   * read once per mount rather than reactively synced.
+   */
+  initialShift: ShiftSettings;
 }
 
 function todayKey(): string {
@@ -68,11 +76,11 @@ function clipToWindow(
   return { leftPct: Math.max(0, leftPct), widthPct: Math.max(0, widthPct) };
 }
 
-export default function FreeSlotViewer({ refreshSignal }: FreeSlotViewerProps) {
+export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlotViewerProps) {
   const [dateFrom, setDateFrom] = useState(todayKey());
   const [dateTo, setDateTo] = useState(addDaysKey(todayKey(), 2));
-  const [dayStartHour, setDayStartHour] = useState("09:00");
-  const [dayEndHour, setDayEndHour] = useState("18:00");
+  const [dayStartHour, setDayStartHour] = useState(initialShift.day_start_hour.slice(0, 5));
+  const [dayEndHour, setDayEndHour] = useState(initialShift.day_end_hour.slice(0, 5));
   const [minDurationMinutes, setMinDurationMinutes] = useState(30);
 
   const [freeSlots, setFreeSlots] = useState<FreeSlotItem[]>([]);
@@ -95,15 +103,30 @@ export default function FreeSlotViewer({ refreshSignal }: FreeSlotViewerProps) {
       return;
     }
 
+    // The backend has no timezone concept — day_start_hour/day_end_hour and
+    // date_from/date_to are taken literally as UTC. Convert the viewer's
+    // local selections to their UTC equivalents (using dateFrom as the
+    // reference day for the hour-of-day pair, applied uniformly across the
+    // whole range) before querying.
+    const startBoundary = toUtcBoundary(dateFrom, dayStartHour);
+    const endBoundaryRef = toUtcBoundary(dateFrom, dayEndHour);
+    if (endBoundaryRef.time <= startBoundary.time) {
+      setError(
+        "This working-hours window crosses UTC midnight in your timezone — try a narrower range.",
+      );
+      return;
+    }
+    const endBoundary = toUtcBoundary(dateTo, dayEndHour);
+
     setIsLoading(true);
     setError(null);
     try {
       const [slotsResponse, engagementList] = await Promise.all([
         getFreeSlots({
-          date_from: dateFrom,
-          date_to: dateTo,
-          day_start_hour: dayStartHour,
-          day_end_hour: dayEndHour,
+          date_from: startBoundary.dateKey,
+          date_to: endBoundary.dateKey,
+          day_start_hour: startBoundary.time,
+          day_end_hour: endBoundaryRef.time,
           min_duration_minutes: minDurationMinutes,
         }),
         listEngagements(),
@@ -150,7 +173,8 @@ export default function FreeSlotViewer({ refreshSignal }: FreeSlotViewerProps) {
         </h2>
       </div>
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        Busy blocks in red/orange, open availability in green.
+        Busy blocks in red/orange, open availability in green. Day start/end default to your{" "}
+        <span className="font-medium">saved shift</span> — adjust below for a one-off search.
       </p>
 
       <form

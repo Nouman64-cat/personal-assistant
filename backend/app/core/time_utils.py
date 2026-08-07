@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 
 def to_naive_utc(value: datetime) -> datetime:
@@ -13,3 +14,16 @@ def to_naive_utc(value: datetime) -> datetime:
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
+
+
+def local_time_to_utc(reference_date: date, local_time: time, tz_name: str) -> time:
+    """Convert a wall-clock time-of-day in `tz_name` to its UTC equivalent.
+
+    Used to translate a saved shift (e.g. "9:00 AM Asia/Karachi") into the
+    literal UTC time-of-day the rest of the app operates in. `reference_date`
+    anchors the conversion (needed for DST-observing zones); callers that
+    apply the result uniformly across a date range should pick one
+    representative date rather than re-deriving it per day.
+    """
+    localized = datetime.combine(reference_date, local_time, tzinfo=ZoneInfo(tz_name))
+    return localized.astimezone(timezone.utc).time()

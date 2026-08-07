@@ -23,6 +23,12 @@ import {
 interface QuickParseInputProps {
   /** Called after at least one engagement is successfully added, so the parent can refresh other views. */
   onAdded?: () => void;
+  /**
+   * Timezone to resolve relative expressions ("tomorrow at 3pm") against.
+   * Defaults to the saved shift's timezone once loaded (falls back to the
+   * browser's detected timezone before that, or if unset).
+   */
+  timezone?: string;
 }
 
 const PLACEHOLDER = `Paste an email, meeting invite, or raw notes, e.g.
@@ -30,7 +36,7 @@ const PLACEHOLDER = `Paste an email, meeting invite, or raw notes, e.g.
 "Hi, can we do a technical interview tomorrow at 2pm for about an hour?
 Also don't forget office hours next Monday 10-12."`;
 
-export default function QuickParseInput({ onAdded }: QuickParseInputProps) {
+export default function QuickParseInput({ onAdded, timezone: timezoneProp }: QuickParseInputProps) {
   const [text, setText] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -39,13 +45,14 @@ export default function QuickParseInput({ onAdded }: QuickParseInputProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const timezone = useMemo(() => {
+  const detectedTimezone = useMemo(() => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone;
     } catch {
       return "UTC";
     }
   }, []);
+  const timezone = timezoneProp ?? detectedTimezone;
 
   async function handleParse() {
     const trimmed = text.trim();

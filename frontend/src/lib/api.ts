@@ -5,6 +5,8 @@ import type {
   FreeSlotsResponse,
   ParseRequest,
   ParseResponse,
+  ShiftSettings,
+  ShiftSettingsInput,
 } from "@/lib/types";
 
 export const API_BASE_URL =
@@ -113,4 +115,17 @@ export function getFreeSlots(params: FreeSlotsParams): Promise<FreeSlotsResponse
     search.set("min_duration_minutes", String(params.min_duration_minutes));
   }
   return request<FreeSlotsResponse>(`/availability/free-slots?${search.toString()}`);
+}
+
+// --- Shift settings ----------------------------------------------------------
+
+export function getShiftSettings(): Promise<ShiftSettings> {
+  return request<ShiftSettings>("/settings/shift");
+}
+
+export function updateShiftSettings(data: ShiftSettingsInput): Promise<ShiftSettings> {
+  return request<ShiftSettings>("/settings/shift", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }

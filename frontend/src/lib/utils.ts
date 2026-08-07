@@ -36,24 +36,14 @@ export const CATEGORY_BLOCK_CLASSES: Record<EngagementCategory, string> = {
 };
 
 /**
- * Parse a naive ISO-8601 datetime string (no timezone offset) into a `Date`
- * whose *local* getters (getHours, getDate, ...) return exactly the
- * wall-clock values encoded in the string. This lets us format and position
- * these timestamps without any timezone conversion, which matches how the
- * backend stores and reasons about them.
+ * Parse a naive ISO-8601 datetime string from the backend (no timezone
+ * offset) into a real `Date` instant. The backend stores every timestamp as
+ * naive UTC, so we interpret the string as UTC here; from then on, all local
+ * `Date` getters (and date-fns' `format`) automatically render it in the
+ * viewer's own timezone.
  */
 export function parseNaiveIso(iso: string): Date {
-  const [datePart, timePart = "00:00:00"] = iso.replace("Z", "").split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hourStr, minuteStr, secondStr] = timePart.split(":");
-  return new Date(
-    year,
-    (month ?? 1) - 1,
-    day ?? 1,
-    Number(hourStr ?? 0),
-    Number(minuteStr ?? 0),
-    Math.trunc(Number(secondStr ?? 0)),
-  );
+  return new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
 }
 
 export function toDateKey(date: Date): string {
@@ -98,4 +88,22 @@ export function minutesSinceMidnight(date: Date): number {
 export function hourStringToMinutes(hourString: string): number {
   const [hourStr, minuteStr] = hourString.split(":");
   return Number(hourStr ?? 0) * 60 + Number(minuteStr ?? 0);
+}
+
+/**
+ * Convert a local wall-clock time (e.g. "09:00") on a given local calendar
+ * date into its UTC equivalent. The backend has no timezone concept — it
+ * takes `day_start_hour`/`day_end_hour` and `date_from`/`date_to` literally —
+ * so the viewer's local "9 AM" has to become the matching UTC date + time
+ * before being sent as a query param.
+ */
+export function toUtcBoundary(dateKey: string, localTime: string): { dateKey: string; time: string } {
+  const [hour, minute] = localTime.split(":").map(Number);
+  const local = parseDateKey(dateKey);
+  local.setHours(hour, minute, 0, 0);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return {
+    dateKey: `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}`,
+    time: `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`,
+  };
 }
