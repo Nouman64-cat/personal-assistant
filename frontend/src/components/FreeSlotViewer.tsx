@@ -88,7 +88,10 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const rangeIsValid = dateFrom <= dateTo && dayStartHour < dayEndHour;
+  // dayStartHour > dayEndHour is a valid overnight window (e.g. 18:00 to
+  // 02:00, ending the next day) — only equal start/end is actually invalid.
+  const isOvernight = dayStartHour > dayEndHour;
+  const rangeIsValid = dateFrom <= dateTo && dayStartHour !== dayEndHour;
 
   // Plain (non-memoized) function, recreated each render so it always closes
   // over the latest filter values — used both by the "Apply" button and the
@@ -98,25 +101,23 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
       setError(
         dateFrom > dateTo
           ? "Start date must be on or before the end date."
-          : "Day start must be before day end.",
+          : "Day start and day end must be different.",
       );
       return;
     }
 
     // The backend has no timezone concept — day_start_hour/day_end_hour and
     // date_from/date_to are taken literally as UTC. Convert the viewer's
-    // local selections to their UTC equivalents (using dateFrom as the
-    // reference day for the hour-of-day pair, applied uniformly across the
-    // whole range) before querying.
+    // local selections to their UTC equivalents before querying. `date_to`
+    // always means "the last day a shift/window may *start*" (the backend
+    // handles extending the tail of an overnight window past that date
+    // itself), so both boundaries use dayStartHour for the date portion. The
+    // end hour's time-of-day is anchored to the *next* local calendar day
+    // when overnight, since that's the day it actually falls on.
     const startBoundary = toUtcBoundary(dateFrom, dayStartHour);
-    const endBoundaryRef = toUtcBoundary(dateFrom, dayEndHour);
-    if (endBoundaryRef.time <= startBoundary.time) {
-      setError(
-        "This working-hours window crosses UTC midnight in your timezone — try a narrower range.",
-      );
-      return;
-    }
-    const endBoundary = toUtcBoundary(dateTo, dayEndHour);
+    const endHourAnchor = isOvernight ? addDaysKey(dateFrom, 1) : dateFrom;
+    const endBoundaryRef = toUtcBoundary(endHourAnchor, dayEndHour);
+    const dateToBoundary = toUtcBoundary(dateTo, dayStartHour);
 
     setIsLoading(true);
     setError(null);
@@ -124,7 +125,7 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
       const [slotsResponse, engagementList] = await Promise.all([
         getFreeSlots({
           date_from: startBoundary.dateKey,
-          date_to: endBoundary.dateKey,
+          date_to: dateToBoundary.dateKey,
           day_start_hour: startBoundary.time,
           day_end_hour: endBoundaryRef.time,
           min_duration_minutes: minDurationMinutes,
@@ -304,9 +305,20 @@ interface DayRowProps {
 }
 
 function DayRow({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots }: DayRowProps) {
+  // dayStartMinutes > dayEndMinutes means this row's window is overnight
+  // (e.g. 18:00 to 02:00) — the end falls on the *next* calendar day.
+  const isOvernight = dayStartMinutes > dayEndMinutes;
+
   const windowStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0);
   windowStart.setMinutes(dayStartMinutes);
-  const windowEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0);
+  const windowEnd = new Date(
+    day.getFullYear(),
+    day.getMonth(),
+    day.getDate() + (isOvernight ? 1 : 0),
+    0,
+    0,
+    0,
+  );
   windowEnd.setMinutes(dayEndMinutes);
 
   const busyBlocks = engagements
@@ -341,6 +353,7 @@ function DayRow({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots }:
         <span className="font-medium text-zinc-700 dark:text-zinc-300">{formatDayLabel(day)}</span>
         <span className="text-zinc-400 dark:text-zinc-500">
           {formatClockTime(windowStart)} – {formatClockTime(windowEnd)}
+          {isOvernight && " (+1 day)"}
         </span>
       </div>
       <div className="relative h-11 w-full overflow-hidden rounded-lg bg-zinc-100 ring-1 ring-inset ring-zinc-200 dark:bg-zinc-800 dark:ring-zinc-700">

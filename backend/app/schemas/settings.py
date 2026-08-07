@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 class ShiftSettingsBase(BaseModel):
     day_start_hour: time
+    # If earlier than day_start_hour (e.g. 18:00 to 02:00), the shift is
+    # treated as overnight, ending the next day.
     day_end_hour: time
     timezone: str
 
@@ -20,8 +22,8 @@ class ShiftSettingsBase(BaseModel):
 
     @model_validator(mode="after")
     def validate_range(self) -> "ShiftSettingsBase":
-        if self.day_start_hour >= self.day_end_hour:
-            raise ValueError("day_start_hour must be before day_end_hour")
+        if self.day_start_hour == self.day_end_hour:
+            raise ValueError("day_start_hour and day_end_hour must not be equal")
         return self
 
 

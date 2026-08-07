@@ -42,7 +42,10 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
     setSaveError(null);
   }
 
-  const rangeIsValid = dayStartHour < dayEndHour;
+  // Start > end is a valid overnight shift (e.g. 18:00 to 02:00, ending the
+  // next day) — only equal start/end is actually invalid (ambiguous: 0h or 24h?).
+  const rangeIsValid = dayStartHour !== dayEndHour;
+  const isOvernight = dayStartHour > dayEndHour;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -136,8 +139,14 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
           </button>
         </div>
 
-        {!rangeIsValid && (
-          <p className="text-xs text-red-600 dark:text-red-400">Start must be before end.</p>
+        {!rangeIsValid ? (
+          <p className="text-xs text-red-600 dark:text-red-400">Start and end must be different.</p>
+        ) : (
+          isOvernight && (
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">
+              Overnight shift — runs from {dayStartHour} until {dayEndHour} the next day.
+            </p>
+          )
         )}
       </form>
 

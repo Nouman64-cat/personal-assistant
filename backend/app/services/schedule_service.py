@@ -73,12 +73,18 @@ def get_free_slots(
     per day, then inverted against that day's working-hour window (clipped to
     the overall [start_range, end_range]) to yield the resulting free slots.
     Slots shorter than `min_duration_minutes` are dropped from the result.
+
+    If `working_hours_start > working_hours_end` (e.g. 18:00 to 02:00), the
+    window is treated as an overnight shift: each day's window runs from
+    `working_hours_start` on that day to `working_hours_end` on the *next*
+    day.
     """
     if start_range >= end_range:
         raise ValueError("start_range must be before end_range")
-    if working_hours_start >= working_hours_end:
-        raise ValueError("working_hours_start must be before working_hours_end")
+    if working_hours_start == working_hours_end:
+        raise ValueError("working_hours_start and working_hours_end must not be equal")
 
+    overnight = working_hours_start > working_hours_end
     buffer_delta = timedelta(minutes=buffer_minutes)
     blocking = [engagement for engagement in existing_engagements if engagement.is_blocking]
 
@@ -87,12 +93,13 @@ def get_free_slots(
     tzinfo = start_range.tzinfo
 
     while current_day <= end_range.date():
+        end_day = current_day + timedelta(days=1) if overnight else current_day
         day_start = max(
             datetime.combine(current_day, working_hours_start, tzinfo=tzinfo),
             start_range,
         )
         day_end = min(
-            datetime.combine(current_day, working_hours_end, tzinfo=tzinfo),
+            datetime.combine(end_day, working_hours_end, tzinfo=tzinfo),
             end_range,
         )
 

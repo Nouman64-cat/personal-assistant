@@ -336,12 +336,124 @@ class TestGetFreeSlots:
                 working_hours_end=time(17, 0),
             )
 
-    def test_invalid_working_hours_raises(self):
+    def test_equal_working_hours_raises(self):
         with pytest.raises(ValueError):
             get_free_slots(
                 start_range=dt(1, 0),
                 end_range=dt(1, 23, 59),
                 existing_engagements=[],
-                working_hours_start=time(17, 0),
+                working_hours_start=time(9, 0),
                 working_hours_end=time(9, 0),
             )
+
+
+class TestGetFreeSlotsOvernight:
+    """working_hours_start > working_hours_end denotes an overnight shift,
+    e.g. 18:00 to 02:00 the next day — the exact case a real night-shift
+    schedule needs. `end_range` in these tests is chosen generously past each
+    night's 2am end so the window isn't accidentally clipped by the overall
+    range — that clipping behavior is covered separately below."""
+
+    def test_no_engagements_spans_midnight_into_next_day(self):
+        slots = get_free_slots(
+            start_range=dt(1, 0),
+            end_range=dt(3, 3),
+            existing_engagements=[],
+            working_hours_start=time(18, 0),
+            working_hours_end=time(2, 0),
+            buffer_minutes=0,
+        )
+        assert slots == [
+            Interval(dt(1, 18), dt(2, 2)),
+            Interval(dt(2, 18), dt(3, 2)),
+        ]
+
+    def test_engagement_during_the_post_midnight_portion(self):
+        existing = [make_engagement(dt(2, 0), dt(2, 1))]
+        slots = get_free_slots(
+            start_range=dt(1, 0),
+            end_range=dt(2, 3),
+            existing_engagements=existing,
+            working_hours_start=time(18, 0),
+            working_hours_end=time(2, 0),
+            buffer_minutes=0,
+        )
+        assert slots == [
+            Interval(dt(1, 18), dt(2, 0)),
+            Interval(dt(2, 1), dt(2, 2)),
+        ]
+
+    def test_engagement_outside_the_overnight_window_is_ignored(self):
+        """A daytime engagement that falls in the gap between one night's end
+        (2am) and the next night's start (6pm) shouldn't affect the window."""
+        existing = [make_engagement(dt(1, 10), dt(1, 11))]
+        slots = get_free_slots(
+            start_range=dt(1, 0),
+            end_range=dt(2, 3),
+            existing_engagements=existing,
+            working_hours_start=time(18, 0),
+            working_hours_end=time(2, 0),
+            buffer_minutes=0,
+        )
+        assert slots == [Interval(dt(1, 18), dt(2, 2))]
+
+    def test_consecutive_overnight_shifts_do_not_bleed_together(self):
+        """The gap between night 1 ending (2am) and night 2 starting (6pm)
+        must not appear as free time, since it's outside working hours."""
+        slots = get_free_slots(
+            start_range=dt(1, 0),
+            end_range=dt(4, 3),
+            existing_engagements=[],
+            working_hours_start=time(18, 0),
+            working_hours_end=time(2, 0),
+            buffer_minutes=0,
+        )
+        gap = Interval(dt(2, 2), dt(2, 18))
+        assert gap not in slots
+        assert slots == [
+            Interval(dt(1, 18), dt(2, 2)),
+            Interval(dt(2, 18), dt(3, 2)),
+            Interval(dt(3, 18), dt(4, 2)),
+        ]
+
+    def test_engagement_spanning_the_midnight_crossing_is_merged(self):
+        existing = [make_engagement(dt(1, 23), dt(2, 1))]
+        slots = get_free_slots(
+            start_range=dt(1, 0),
+            end_range=dt(2, 3),
+            existing_engagements=existing,
+            working_hours_start=time(18, 0),
+            working_hours_end=time(2, 0),
+            buffer_minutes=0,
+        )
+        assert slots == [
+            Interval(dt(1, 18), dt(1, 23)),
+            Interval(dt(2, 1), dt(2, 2)),
+        ]
+
+    def test_min_duration_filters_short_overnight_gaps(self):
+        existing = [make_engagement(dt(1, 20), dt(2, 1, 50))]
+        slots = get_free_slots(
+            start_range=dt(1, 0),
+            end_range=dt(2, 3),
+            existing_engagements=existing,
+            working_hours_start=time(18, 0),
+            working_hours_end=time(2, 0),
+            buffer_minutes=0,
+            min_duration_minutes=30,
+        )
+        # Free gaps are 18:00-20:00 (2h, kept) and 01:50-02:00 (10m, dropped).
+        assert slots == [Interval(dt(1, 18), dt(1, 20))]
+
+    def test_overall_range_clips_the_final_nights_tail(self):
+        """If `end_range` cuts off mid-night, that night's window is clipped
+        to the range rather than extending the full 8 hours."""
+        slots = get_free_slots(
+            start_range=dt(1, 0),
+            end_range=dt(1, 23, 59),
+            existing_engagements=[],
+            working_hours_start=time(18, 0),
+            working_hours_end=time(2, 0),
+            buffer_minutes=0,
+        )
+        assert slots == [Interval(dt(1, 18), dt(1, 23, 59))]
