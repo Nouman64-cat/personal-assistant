@@ -28,7 +28,12 @@ def send_message(
     except ChatServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
-    return ChatMessageResponse(session_id=result.session_id, reply=result.reply, actions=result.actions)
+    return ChatMessageResponse(
+        session_id=result.session_id,
+        reply=result.reply,
+        actions=result.actions,
+        free_slots=result.free_slots,
+    )
 
 
 @router.get("/{session_id}/messages", response_model=ChatHistoryResponse)
@@ -46,6 +51,7 @@ def get_messages(session_id: UUID, session: Session = Depends(get_session)) -> C
                 content=row.content or "",
                 created_at=row.created_at,
                 actions=json.loads(row.actions_json) if row.actions_json else [],
+                free_slots=json.loads(row.free_slots_json) if row.free_slots_json else [],
             )
             for row in rows
         ],

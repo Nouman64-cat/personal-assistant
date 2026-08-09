@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CalendarClock, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarClock, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 import { ApiError, getFreeSlots, listEngagements } from "@/lib/api";
-import type { Engagement, FreeSlotItem, ShiftSettings } from "@/lib/types";
+import type { Engagement, EngagementCategory, FreeSlotItem, ShiftSettings } from "@/lib/types";
 import {
   CATEGORY_BLOCK_CLASSES,
   CATEGORY_LABELS,
+  cn,
   formatDayLabel,
   formatDuration,
+  formatMonthLabel,
   formatTime,
   hourStringToMinutes,
   minutesSinceMidnight,
@@ -19,22 +21,18 @@ import {
   toUtcBoundary,
 } from "@/lib/utils";
 
-const MAX_RENDERED_DAYS = 31;
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 interface FreeSlotViewerProps {
   /** Bump this to force a refetch (e.g. after new engagements were added elsewhere). */
   refreshSignal?: number;
   /**
-   * The saved shift, used to seed the initial day-start/day-end filters. The
-   * parent should remount this component (e.g. via a `key` tied to the
-   * shift's save version) when the shift changes, so this only needs to be
-   * read once per mount rather than reactively synced.
+   * The saved shift, used for the day-start/day-end window. The parent
+   * should remount this component (e.g. via a `key` tied to the shift's
+   * save version) when the shift changes, so this only needs to be read
+   * once per mount rather than reactively synced.
    */
   initialShift: ShiftSettings;
-}
-
-function todayKey(): string {
-  return toDateKey(new Date());
 }
 
 function addDaysKey(key: string, days: number): string {
@@ -43,12 +41,28 @@ function addDaysKey(key: string, days: number): string {
   return toDateKey(date);
 }
 
-function getDaysInRange(fromKey: string, toKey: string): Date[] {
-  const start = parseDateKey(fromKey);
-  const end = parseDateKey(toKey);
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, delta: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
+}
+
+function endOfMonthKey(monthCursor: Date): string {
+  return toDateKey(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0));
+}
+
+/** The visible grid for a month: full weeks (Sun–Sat), padded with the tail of the previous month and the head of the next. */
+function getMonthGridDays(monthCursor: Date): Date[] {
+  const start = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
+  start.setDate(start.getDate() - start.getDay());
+  const end = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0);
+  end.setDate(end.getDate() + (6 - end.getDay()));
+
   const days: Date[] = [];
   const cursor = new Date(start);
-  while (cursor <= end && days.length < MAX_RENDERED_DAYS) {
+  while (cursor <= end) {
     days.push(new Date(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -77,11 +91,12 @@ function clipToWindow(
 }
 
 export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlotViewerProps) {
-  const [dateFrom, setDateFrom] = useState(todayKey());
-  const [dateTo, setDateTo] = useState(addDaysKey(todayKey(), 2));
-  const [dayStartHour, setDayStartHour] = useState(initialShift.day_start_hour.slice(0, 5));
-  const [dayEndHour, setDayEndHour] = useState(initialShift.day_end_hour.slice(0, 5));
-  const [minDurationMinutes, setMinDurationMinutes] = useState(30);
+  const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+
+  const dayStartHour = initialShift.day_start_hour.slice(0, 5);
+  const dayEndHour = initialShift.day_end_hour.slice(0, 5);
+  const minDurationMinutes = 30;
 
   const [freeSlots, setFreeSlots] = useState<FreeSlotItem[]>([]);
   const [engagements, setEngagements] = useState<Engagement[]>([]);
@@ -90,21 +105,14 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
 
   // dayStartHour > dayEndHour is a valid overnight window (e.g. 18:00 to
   // 02:00, ending the next day) — only equal start/end is actually invalid.
+  // ShiftSettingsForm guarantees they're never equal.
   const isOvernight = dayStartHour > dayEndHour;
-  const rangeIsValid = dateFrom <= dateTo && dayStartHour !== dayEndHour;
 
   // Plain (non-memoized) function, recreated each render so it always closes
-  // over the latest filter values — used both by the "Apply" button and the
-  // mount/refresh effect below.
+  // over the latest values — used by the mount/refresh/month-change effect below.
   async function loadData() {
-    if (!rangeIsValid) {
-      setError(
-        dateFrom > dateTo
-          ? "Start date must be on or before the end date."
-          : "Day start and day end must be different.",
-      );
-      return;
-    }
+    const dateFrom = toDateKey(monthCursor);
+    const dateTo = endOfMonthKey(monthCursor);
 
     // The backend has no timezone concept — day_start_hour/day_end_hour and
     // date_from/date_to are taken literally as UTC. Convert the viewer's
@@ -143,19 +151,13 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
 
   useEffect(() => {
     // Fetches on mount and whenever the parent bumps `refreshSignal` (e.g.
-    // after Quick Parse adds engagements), intentionally using whichever
-    // filter values are current at that moment — not on every filter
-    // keystroke, which goes through the explicit "Apply" button instead.
+    // after a chat action adds engagements elsewhere) or the visible month
+    // changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
     // loadData is intentionally omitted — see comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshSignal]);
-
-  const days = useMemo(
-    () => (rangeIsValid ? getDaysInRange(dateFrom, dateTo) : []),
-    [dateFrom, dateTo, rangeIsValid],
-  );
+  }, [refreshSignal, monthCursor]);
 
   const dayStartMinutes = hourStringToMinutes(dayStartHour);
   const dayEndMinutes = hourStringToMinutes(dayEndHour);
@@ -165,132 +167,172 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
     [engagements],
   );
 
+  // Per-day summary (which categories are busy, whether there's any free
+  // time) used to render the small indicator dots on each month-grid cell.
+  const daySummaries = useMemo(() => {
+    const map = new Map<string, { categories: Set<EngagementCategory>; hasFree: boolean }>();
+    for (const engagement of blockingEngagements) {
+      const key = toDateKey(parseNaiveIso(engagement.start_time));
+      const entry = map.get(key) ?? { categories: new Set<EngagementCategory>(), hasFree: false };
+      entry.categories.add(engagement.category);
+      map.set(key, entry);
+    }
+    for (const slot of freeSlots) {
+      const key = toDateKey(parseNaiveIso(slot.start_time));
+      const entry = map.get(key) ?? { categories: new Set<EngagementCategory>(), hasFree: false };
+      entry.hasFree = true;
+      map.set(key, entry);
+    }
+    return map;
+  }, [blockingEngagements, freeSlots]);
+
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center gap-2">
+    <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex shrink-0 items-center gap-2">
         <CalendarClock className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
           Daily Timeline &amp; Free Slots
         </h2>
+        {isLoading && <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />}
       </div>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        Busy blocks in red/orange, open availability in green. Day start/end default to your{" "}
-        <span className="font-medium">saved shift</span> — adjust below for a one-off search.
-      </p>
-
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          loadData();
-        }}
-        className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 lg:items-end"
-      >
-        <Field label="From">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(event) => setDateFrom(event.target.value)}
-            className={inputClasses}
-          />
-        </Field>
-        <Field label="To">
-          <input
-            type="date"
-            value={dateTo}
-            min={dateFrom}
-            onChange={(event) => setDateTo(event.target.value)}
-            className={inputClasses}
-          />
-        </Field>
-        <Field label="Day starts">
-          <input
-            type="time"
-            value={dayStartHour}
-            onChange={(event) => setDayStartHour(event.target.value)}
-            className={inputClasses}
-          />
-        </Field>
-        <Field label="Day ends">
-          <input
-            type="time"
-            value={dayEndHour}
-            onChange={(event) => setDayEndHour(event.target.value)}
-            className={inputClasses}
-          />
-        </Field>
-        <Field label="Min duration (min)">
-          <input
-            type="number"
-            min={1}
-            step={5}
-            value={minDurationMinutes}
-            onChange={(event) => setMinDurationMinutes(Number(event.target.value) || 1)}
-            className={inputClasses}
-          />
-        </Field>
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Apply
-        </button>
-      </form>
 
       {error && (
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400">
+        <div className="mt-4 flex shrink-0 items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">
-        <LegendDot colorClass="bg-indigo-400/40 dark:bg-indigo-400/30" label="Shift hours" />
-        <LegendDot colorClass="bg-emerald-500" label="Free" />
-        <LegendDot colorClass="bg-red-500" label="Meeting / Interview" />
-        <LegendDot colorClass="bg-orange-500" label="Office Hours / Personal" />
-      </div>
+      {selectedDayKey ? (
+        <div className="mt-4 flex shrink-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setSelectedDayKey(null)}
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to month
+          </button>
+          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+            {formatDayLabel(parseDateKey(selectedDayKey))}
+          </span>
+        </div>
+      ) : (
+        <div className="mt-4 flex shrink-0 items-center justify-between">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setMonthCursor((prev) => addMonths(prev, -1))}
+              aria-label="Previous month"
+              className="rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="min-w-36 text-center text-sm font-medium text-zinc-900 dark:text-zinc-50">
+              {formatMonthLabel(monthCursor)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setMonthCursor((prev) => addMonths(prev, 1))}
+              aria-label="Next month"
+              className="rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMonthCursor(startOfMonth(new Date()))}
+            className="rounded-lg px-2.5 py-1 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            Today
+          </button>
+        </div>
+      )}
 
-      <div className="mt-4">
-        {days.length === 0 && !error ? (
-          <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            Choose a valid date range to see availability.
-          </p>
-        ) : (
+      <div className="mt-4 min-h-0 flex-1">
+        {selectedDayKey ? (
           <CalendarGrid
-            days={days}
+            days={[parseDateKey(selectedDayKey)]}
             dayStartMinutes={dayStartMinutes}
             dayEndMinutes={dayEndMinutes}
             engagements={blockingEngagements}
             freeSlots={freeSlots}
           />
+        ) : (
+          <MonthGrid monthCursor={monthCursor} daySummaries={daySummaries} onSelectDay={setSelectedDayKey} />
         )}
       </div>
     </section>
   );
 }
 
-const inputClasses =
-  "w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100";
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
+interface MonthGridProps {
+  monthCursor: Date;
+  daySummaries: Map<string, { categories: Set<EngagementCategory>; hasFree: boolean }>;
+  onSelectDay: (dateKey: string) => void;
 }
 
-function LegendDot({ colorClass, label }: { colorClass: string; label: string }) {
+function MonthGrid({ monthCursor, daySummaries, onSelectDay }: MonthGridProps) {
+  const gridDays = useMemo(() => getMonthGridDays(monthCursor), [monthCursor]);
+  const weeksCount = gridDays.length / 7;
+  const todayDateKey = toDateKey(new Date());
+
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={`h-2.5 w-2.5 rounded-full ${colorClass}`} />
-      {label}
-    </span>
+    <div className="flex h-full flex-col">
+      <div className="grid shrink-0 grid-cols-7 gap-1 pb-1 text-center text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+        {WEEKDAY_LABELS.map((label) => (
+          <div key={label}>{label}</div>
+        ))}
+      </div>
+      <div
+        className="grid flex-1 grid-cols-7 gap-1"
+        style={{ gridTemplateRows: `repeat(${weeksCount}, minmax(0, 1fr))` }}
+      >
+        {gridDays.map((day) => {
+          const dateKey = toDateKey(day);
+          const inCurrentMonth = day.getMonth() === monthCursor.getMonth();
+          const isToday = dateKey === todayDateKey;
+          const summary = daySummaries.get(dateKey);
+          const hasMeeting =
+            summary?.categories.has("meeting") || summary?.categories.has("interview") || false;
+          const hasOfficeHours =
+            summary?.categories.has("office_hours") || summary?.categories.has("personal") || false;
+
+          return (
+            <button
+              key={dateKey}
+              type="button"
+              disabled={!inCurrentMonth}
+              onClick={() => onSelectDay(dateKey)}
+              className={cn(
+                "flex flex-col items-start gap-1.5 rounded-lg border p-2 text-left transition",
+                inCurrentMonth
+                  ? "border-zinc-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/5"
+                  : "cursor-default border-transparent bg-transparent",
+                isToday && "ring-2 ring-inset ring-emerald-500",
+              )}
+            >
+              <span
+                className={cn(
+                  "text-xs font-medium",
+                  inCurrentMonth ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-300 dark:text-zinc-700",
+                )}
+              >
+                {day.getDate()}
+              </span>
+              {inCurrentMonth && (hasMeeting || hasOfficeHours || summary?.hasFree) && (
+                <span className="flex gap-1">
+                  {hasMeeting && <span className="h-1.5 w-1.5 rounded-full bg-red-500" />}
+                  {hasOfficeHours && <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
+                  {summary?.hasFree && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -391,8 +433,7 @@ function CalendarGrid({ days, dayStartMinutes, dayEndMinutes, engagements, freeS
   return (
     <div
       ref={scrollRef}
-      className="overflow-auto rounded-lg border border-zinc-200 dark:border-zinc-700"
-      style={{ maxHeight: 560 }}
+      className="h-full overflow-auto rounded-lg border border-zinc-200 dark:border-zinc-700"
     >
       <div className="flex" style={{ minWidth: HOUR_LABEL_COLUMN_WIDTH_PX + days.length * DAY_COLUMN_MIN_WIDTH_PX }}>
         <div

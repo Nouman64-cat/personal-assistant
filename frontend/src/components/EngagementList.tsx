@@ -57,20 +57,20 @@ export default function EngagementList({ refreshSignal, onChanged }: EngagementL
   const sorted = [...engagements].sort((a, b) => a.start_time.localeCompare(b.start_time));
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Engagements</h2>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+    <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <h2 className="shrink-0 text-lg font-semibold text-zinc-900 dark:text-zinc-50">Engagements</h2>
+      <p className="mt-1 shrink-0 text-sm text-zinc-500 dark:text-zinc-400">
         Everything currently on the calendar.
       </p>
 
       {error && (
-        <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400">
+        <div className="mt-3 flex shrink-0 items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      <div className="mt-4 max-h-96 space-y-2 overflow-y-auto">
+      <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-8 text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />

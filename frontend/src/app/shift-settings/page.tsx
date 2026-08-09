@@ -7,7 +7,7 @@ export default function ShiftSettingsPage() {
   const { shift, shiftLoadError, handleShiftSaved } = useAppState();
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-8">
+    <div className="w-full px-6 py-8">
       <header className="mb-6">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Shift Settings</h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">

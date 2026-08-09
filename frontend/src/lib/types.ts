@@ -47,6 +47,12 @@ export interface ChatMessageResponse {
   session_id: string;
   reply: string;
   actions: EngagementAction[];
+  /**
+   * Unlike `FreeSlotItem`s from the REST /free-slots endpoint (naive UTC),
+   * these come back as offset-aware ISO strings already in the user's local
+   * timezone — parse directly with `new Date(...)`, not `parseNaiveIso`.
+   */
+  free_slots: FreeSlotItem[];
 }
 
 export interface ChatHistoryMessageDto {
@@ -54,6 +60,7 @@ export interface ChatHistoryMessageDto {
   content: string;
   created_at: string;
   actions: EngagementAction[];
+  free_slots: FreeSlotItem[];
 }
 
 export interface ChatHistoryResponse {

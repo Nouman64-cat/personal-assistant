@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.schemas.engagement import EngagementRead
+from app.schemas.schedule import FreeSlotItem
 
 
 class EngagementActionType(str, Enum):
@@ -38,6 +39,7 @@ class ChatMessageResponse(BaseModel):
     session_id: UUID
     reply: str
     actions: List[EngagementAction] = Field(default_factory=list)
+    free_slots: List[FreeSlotItem] = Field(default_factory=list)
 
 
 class ChatHistoryMessage(BaseModel):
@@ -45,6 +47,7 @@ class ChatHistoryMessage(BaseModel):
     content: str
     created_at: datetime
     actions: List[EngagementAction] = Field(default_factory=list)
+    free_slots: List[FreeSlotItem] = Field(default_factory=list)
 
 
 class ChatHistoryResponse(BaseModel):

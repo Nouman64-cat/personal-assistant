@@ -8,16 +8,16 @@ export default function CalendarPage() {
   const { shift, shiftLoadError, shiftVersion, refreshSignal, triggerRefresh } = useAppState();
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <header className="mb-6">
+    <div className="flex h-full w-full flex-col px-6 py-8">
+      <header className="mb-6 shrink-0">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Calendar</h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           See where you actually have time, and everything currently on the calendar.
         </p>
       </header>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="min-h-0 lg:col-span-2">
           {shift ? (
             <FreeSlotViewer key={shiftVersion} refreshSignal={refreshSignal} initialShift={shift} />
           ) : (
@@ -26,7 +26,7 @@ export default function CalendarPage() {
             </section>
           )}
         </div>
-        <div>
+        <div className="min-h-0">
           <EngagementList refreshSignal={refreshSignal} onChanged={triggerRefresh} />
         </div>
       </div>

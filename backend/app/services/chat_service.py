@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.db.models import ChatMessage, ChatRole, ChatSession, EngagementCategory
 from app.schemas.chat import EngagementAction, EngagementActionType
 from app.schemas.engagement import EngagementCreate, EngagementRead, EngagementUpdate
+from app.schemas.schedule import FreeSlotItem
 from app.services import engagement_service
 from app.services.engagement_service import EngagementConflictError, EngagementNotFoundError
 from app.services.schedule_service import resolve_free_slots_for_range
@@ -41,6 +42,7 @@ class ChatTurnResult:
     session_id: UUID
     reply: str
     actions: List[EngagementAction] = field(default_factory=list)
+    free_slots: List[FreeSlotItem] = field(default_factory=list)
 
 
 TOOLS = [
@@ -141,7 +143,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_free_slots",
-            "description": "Find open time slots within the user's working hours over a date range.",
+            "description": (
+                "Find open time slots within the user's working hours over a date range. The app "
+                "renders the returned slots itself as a visual list — don't itemize them again in "
+                "your reply."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -163,12 +169,17 @@ def _build_system_prompt(reference_datetime: datetime, timezone_name: str) -> st
         "and to check free time slots — never claim to have done something without calling the "
         "matching tool. Resolve relative or vague date/time expressions (e.g. 'tomorrow at 3pm', "
         "'next Tuesday') using the reference datetime below as 'now'. Always pass start_time/"
-        "end_time to tools as ISO-8601 timestamps including a UTC offset.\n\n"
+        "end_time to tools as ISO-8601 timestamps including a UTC offset. Timestamps that tools "
+        "return to you (engagements, free slots) are already in the user's local timezone (given "
+        "below), each with that zone's own UTC offset — read the wall-clock digits directly when "
+        "describing them, no conversion needed.\n\n"
         "When the user refers to an existing engagement ('that meeting', 'the interview'), "
         "resolve it via list_engagements (or an id you already learned earlier in this "
         "conversation) before calling update_engagement or delete_engagement — never guess an id. "
         "After completing the requested actions, reply with a brief, natural confirmation of what "
-        "changed; don't narrate tool mechanics.\n\n"
+        "changed; don't narrate tool mechanics. After check_free_slots, keep the reply to a short "
+        "sentence or two (e.g. how many days had openings, or anything notable) — the app displays "
+        "the actual slot list as its own widget, so don't repeat it in prose.\n\n"
         f"Reference datetime (the user's current local time), treat this as 'now': "
         f"{reference_datetime.isoformat()} ({timezone_name})."
     )
@@ -242,12 +253,36 @@ def _parse_optional_datetime(value: object) -> Optional[datetime]:
         return None
 
 
-def _execute_tool(session: Session, tool_call) -> Tuple[dict, Optional[EngagementAction]]:
+def _utc_to_local_iso(value: datetime, tzinfo: ZoneInfo) -> str:
+    """Convert a naive UTC datetime to an ISO string in the user's local zone.
+
+    Stored/returned start_time and end_time are naive datetimes that the rest
+    of the app treats as UTC by convention. Tagging them with just a "+00:00"
+    offset and asking the model to do the hour-shift arithmetic itself turned
+    out to be unreliable in practice (it echoed the UTC digits unconverted,
+    reporting a 6 PM–9 PM local shift as "1 PM to 4 PM"). Converting here
+    means the model only has to read off already-correct local wall-clock
+    digits, no arithmetic required.
+    """
+    return value.replace(tzinfo=timezone.utc).astimezone(tzinfo).isoformat()
+
+
+def _localize_engagement(engagement_dump: dict, tzinfo: ZoneInfo) -> dict:
+    for key in ("start_time", "end_time"):
+        if engagement_dump.get(key):
+            engagement_dump[key] = _utc_to_local_iso(datetime.fromisoformat(engagement_dump[key]), tzinfo)
+    return engagement_dump
+
+
+ToolResult = Tuple[dict, Optional[EngagementAction], List[FreeSlotItem]]
+
+
+def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
     name = tool_call.function.name
     try:
         args = json.loads(tool_call.function.arguments or "{}")
     except json.JSONDecodeError as exc:
-        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None
+        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None, []
 
     try:
         if name == "create_engagement":
@@ -264,12 +299,13 @@ def _execute_tool(session: Session, tool_call) -> Tuple[dict, Optional[Engagemen
                 type=EngagementActionType.CREATED,
                 engagement=EngagementRead.model_validate(engagement),
             )
-            return {"status": "ok", "engagement": action.engagement.model_dump(mode="json")}, action
+            result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
+            return result, action, []
 
         if name == "update_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, []
             update_fields = {k: v for k, v in args.items() if k != "engagement_id"}
             payload = EngagementUpdate(**update_fields)
             engagement = engagement_service.update_engagement(session, engagement_id, payload)
@@ -277,18 +313,20 @@ def _execute_tool(session: Session, tool_call) -> Tuple[dict, Optional[Engagemen
                 type=EngagementActionType.UPDATED,
                 engagement=EngagementRead.model_validate(engagement),
             )
-            return {"status": "ok", "engagement": action.engagement.model_dump(mode="json")}, action
+            result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
+            return result, action, []
 
         if name == "delete_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, []
             snapshot = engagement_service.delete_engagement(session, engagement_id)
             action = EngagementAction(
                 type=EngagementActionType.DELETED,
                 engagement=EngagementRead.model_validate(snapshot),
             )
-            return {"status": "ok", "engagement": action.engagement.model_dump(mode="json")}, action
+            result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
+            return result, action, []
 
         if name == "list_engagements":
             results = engagement_service.list_engagements(
@@ -301,9 +339,10 @@ def _execute_tool(session: Session, tool_call) -> Tuple[dict, Optional[Engagemen
             return {
                 "status": "ok",
                 "engagements": [
-                    EngagementRead.model_validate(e).model_dump(mode="json") for e in results
+                    _localize_engagement(EngagementRead.model_validate(e).model_dump(mode="json"), tzinfo)
+                    for e in results
                 ],
-            }, None
+            }, None, []
 
         if name == "check_free_slots":
             slots = resolve_free_slots_for_range(
@@ -312,24 +351,26 @@ def _execute_tool(session: Session, tool_call) -> Tuple[dict, Optional[Engagemen
                 date_to=date.fromisoformat(args["date_to"]),
                 min_duration_minutes=int(args.get("min_duration_minutes") or 30),
             )[:20]
-            return {
+            free_slots = [
+                FreeSlotItem(
+                    start_time=_utc_to_local_iso(slot.start, tzinfo),
+                    end_time=_utc_to_local_iso(slot.end, tzinfo),
+                    duration_minutes=int((slot.end - slot.start).total_seconds() // 60),
+                )
+                for slot in slots
+            ]
+            result = {
                 "status": "ok",
-                "slots": [
-                    {
-                        "start_time": slot.start.isoformat(),
-                        "end_time": slot.end.isoformat(),
-                        "duration_minutes": int((slot.end - slot.start).total_seconds() // 60),
-                    }
-                    for slot in slots
-                ],
-            }, None
+                "slots": [item.model_dump(mode="json") for item in free_slots],
+            }
+            return result, None, free_slots
 
-        return {"status": "error", "message": f"Unknown tool {name!r}"}, None
+        return {"status": "error", "message": f"Unknown tool {name!r}"}, None, []
 
     except (EngagementNotFoundError, EngagementConflictError) as exc:
-        return {"status": "error", "message": str(exc)}, None
+        return {"status": "error", "message": str(exc)}, None, []
     except (ValidationError, ValueError, KeyError, TypeError) as exc:
-        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None
+        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None, []
 
 
 def send_message(
@@ -365,6 +406,7 @@ def send_message(
     }
 
     actions: List[EngagementAction] = []
+    free_slots: List[FreeSlotItem] = []
 
     for _ in range(settings.CHAT_MAX_TOOL_ROUNDTRIPS):
         messages_for_api = [system_message] + _replay_messages(session, chat_session.id)
@@ -425,9 +467,11 @@ def send_message(
             session.commit()
 
             for tool_call in message.tool_calls:
-                result, action = _execute_tool(session, tool_call)
+                result, action, slots = _execute_tool(session, tool_call, tzinfo)
                 if action is not None:
                     actions.append(action)
+                if slots:
+                    free_slots.extend(slots)
                 session.add(
                     ChatMessage(
                         session_id=chat_session.id,
@@ -448,11 +492,12 @@ def send_message(
                 role=ChatRole.ASSISTANT,
                 content=reply,
                 actions_json=json.dumps([action.model_dump(mode="json") for action in actions]),
+                free_slots_json=json.dumps([slot.model_dump(mode="json") for slot in free_slots]),
             )
         )
         session.commit()
 
-        return ChatTurnResult(session_id=chat_session.id, reply=reply, actions=actions)
+        return ChatTurnResult(session_id=chat_session.id, reply=reply, actions=actions, free_slots=free_slots)
 
     raise ChatServiceError(
         "Assistant could not complete this request after several tool calls", status_code=502
