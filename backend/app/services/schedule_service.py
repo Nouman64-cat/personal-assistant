@@ -136,6 +136,12 @@ def get_free_slots(
     return free_slots
 
 
+@dataclass(frozen=True)
+class FreeSlotsResult:
+    slots: List[Interval]
+    blocking_engagements: List[Engagement]
+
+
 def resolve_free_slots_for_range(
     session: Session,
     date_from: date,
@@ -143,11 +149,15 @@ def resolve_free_slots_for_range(
     day_start_hour: Optional[time] = None,
     day_end_hour: Optional[time] = None,
     min_duration_minutes: int = 30,
-) -> List[Interval]:
+) -> FreeSlotsResult:
     """Compute free slots for a date range, falling back to the saved shift
     for any window bound left unspecified. Shared by the /free-slots REST
     endpoint and the chat `check_free_slots` tool so the overnight-window
     boundary math (see `test_availability_endpoint.py`) only lives once.
+
+    Also returns the blocking engagements considered, so callers that want to
+    describe *why* a stretch is busy (e.g. the chat widget's hover tooltip)
+    don't have to re-derive the same date-range query.
     """
     if date_from > date_to:
         raise ValueError("date_from must not be after date_to")
@@ -184,7 +194,7 @@ def resolve_free_slots_for_range(
         )
     ).all()
 
-    return get_free_slots(
+    slots = get_free_slots(
         start_range=start_range,
         end_range=end_range,
         existing_engagements=blocking_engagements,
@@ -193,3 +203,4 @@ def resolve_free_slots_for_range(
         buffer_minutes=0,
         min_duration_minutes=min_duration_minutes,
     )
+    return FreeSlotsResult(slots=slots, blocking_engagements=list(blocking_engagements))

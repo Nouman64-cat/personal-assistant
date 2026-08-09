@@ -33,6 +33,7 @@ def send_message(
         reply=result.reply,
         actions=result.actions,
         free_slots=result.free_slots,
+        busy_engagements=result.busy_engagements,
     )
 
 
@@ -52,6 +53,7 @@ def get_messages(session_id: UUID, session: Session = Depends(get_session)) -> C
                 created_at=row.created_at,
                 actions=json.loads(row.actions_json) if row.actions_json else [],
                 free_slots=json.loads(row.free_slots_json) if row.free_slots_json else [],
+                busy_engagements=json.loads(row.busy_engagements_json) if row.busy_engagements_json else [],
             )
             for row in rows
         ],

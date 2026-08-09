@@ -5,7 +5,7 @@ import { AlertTriangle, Loader2, MessageSquarePlus, Send, Sparkles } from "lucid
 
 import { ApiError, getChatHistory, sendChatMessage } from "@/lib/api";
 import { useAppState } from "@/lib/appState";
-import type { EngagementAction, FreeSlotItem } from "@/lib/types";
+import type { BusyEngagementInfo, EngagementAction, FreeSlotItem } from "@/lib/types";
 
 import ChatMessageBubble from "./ChatMessageBubble";
 
@@ -16,6 +16,7 @@ interface DisplayMessage {
   content: string;
   actions?: EngagementAction[];
   freeSlots?: FreeSlotItem[];
+  busyEngagements?: BusyEngagementInfo[];
 }
 
 export default function ChatPanel() {
@@ -58,6 +59,7 @@ export default function ChatPanel() {
             content: message.content,
             actions: message.actions,
             freeSlots: message.free_slots,
+            busyEngagements: message.busy_engagements,
           })),
         );
       })
@@ -107,6 +109,7 @@ export default function ChatPanel() {
           content: response.reply,
           actions: response.actions,
           freeSlots: response.free_slots,
+          busyEngagements: response.busy_engagements,
         },
       ]);
       if (response.actions.length > 0) triggerRefresh();
@@ -168,6 +171,8 @@ export default function ChatPanel() {
               content={message.content}
               actions={message.actions}
               freeSlots={message.freeSlots}
+              busyEngagements={message.busyEngagements}
+              shift={shift}
             />
           ))
         )}

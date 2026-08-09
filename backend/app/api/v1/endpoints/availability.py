@@ -38,7 +38,7 @@ def free_slots(
     session: Session = Depends(get_session),
 ) -> FreeSlotsResponse:
     try:
-        slots = resolve_free_slots_for_range(
+        result = resolve_free_slots_for_range(
             session,
             date_from=date_from,
             date_to=date_to,
@@ -56,7 +56,7 @@ def free_slots(
                 end_time=slot.end,
                 duration_minutes=int((slot.end - slot.start).total_seconds() // 60),
             )
-            for slot in slots
+            for slot in result.slots
         ]
     )
 

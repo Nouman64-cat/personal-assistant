@@ -53,6 +53,9 @@ export interface ChatMessageResponse {
    * timezone — parse directly with `new Date(...)`, not `parseNaiveIso`.
    */
   free_slots: FreeSlotItem[];
+  /** What's occupying the busy stretches within free_slots' shift window —
+   * same offset-aware-local convention as free_slots. */
+  busy_engagements: BusyEngagementInfo[];
 }
 
 export interface ChatHistoryMessageDto {
@@ -61,6 +64,14 @@ export interface ChatHistoryMessageDto {
   created_at: string;
   actions: EngagementAction[];
   free_slots: FreeSlotItem[];
+  busy_engagements: BusyEngagementInfo[];
+}
+
+export interface BusyEngagementInfo {
+  title: string;
+  category: EngagementCategory;
+  start_time: string;
+  end_time: string;
 }
 
 export interface ChatHistoryResponse {

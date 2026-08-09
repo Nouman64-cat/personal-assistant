@@ -3,7 +3,7 @@ import { ArrowRight } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { EngagementAction, FreeSlotItem } from "@/lib/types";
+import type { BusyEngagementInfo, EngagementAction, FreeSlotItem, ShiftSettings } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import EngagementActionCard from "./EngagementActionCard";
@@ -14,6 +14,10 @@ interface ChatMessageBubbleProps {
   content: string;
   actions?: EngagementAction[];
   freeSlots?: FreeSlotItem[];
+  busyEngagements?: BusyEngagementInfo[];
+  /** Needed to bound the free-slots timeline bar to the shift window; the
+   * widget just doesn't render until the shift has loaded. */
+  shift?: ShiftSettings | null;
 }
 
 /** Compact markdown styling to match the bubble's text-sm rhythm — the
@@ -44,6 +48,8 @@ export default function ChatMessageBubble({
   content,
   actions = [],
   freeSlots = [],
+  busyEngagements = [],
+  shift = null,
 }: ChatMessageBubbleProps) {
   const isUser = role === "user";
 
@@ -64,7 +70,9 @@ export default function ChatMessageBubble({
             </ReactMarkdown>
           )}
         </div>
-        {freeSlots.length > 0 && <FreeSlotsCard slots={freeSlots} />}
+        {freeSlots.length > 0 && shift && (
+          <FreeSlotsCard slots={freeSlots} busyEngagements={busyEngagements} shift={shift} />
+        )}
         {actions.length > 0 && (
           <div className="w-full space-y-1.5">
             {actions.map((action, index) => (

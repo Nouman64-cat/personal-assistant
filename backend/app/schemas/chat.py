@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.db.models import EngagementCategory
 from app.schemas.engagement import EngagementRead
 from app.schemas.schedule import FreeSlotItem
 
@@ -18,6 +19,19 @@ class EngagementActionType(str, Enum):
 class EngagementAction(BaseModel):
     type: EngagementActionType
     engagement: EngagementRead
+
+
+class BusyEngagementInfo(BaseModel):
+    """A lightweight, non-UTC-normalizing view of a blocking engagement, used
+    only to describe *why* a stretch in the free-slots widget is busy (e.g. a
+    hover tooltip). Deliberately not `EngagementRead` — that schema's
+    start_time/end_time validator always renormalizes to naive UTC, which
+    would silently undo the local-timezone conversion this needs."""
+
+    title: str
+    category: EngagementCategory
+    start_time: datetime
+    end_time: datetime
 
 
 class ChatMessageRequest(BaseModel):
@@ -40,6 +54,10 @@ class ChatMessageResponse(BaseModel):
     reply: str
     actions: List[EngagementAction] = Field(default_factory=list)
     free_slots: List[FreeSlotItem] = Field(default_factory=list)
+    # The blocking engagements considered while computing free_slots, so the
+    # UI can describe *why* a stretch is busy (e.g. a hover tooltip) instead
+    # of just showing "Busy".
+    busy_engagements: List[BusyEngagementInfo] = Field(default_factory=list)
 
 
 class ChatHistoryMessage(BaseModel):
@@ -48,6 +66,7 @@ class ChatHistoryMessage(BaseModel):
     created_at: datetime
     actions: List[EngagementAction] = Field(default_factory=list)
     free_slots: List[FreeSlotItem] = Field(default_factory=list)
+    busy_engagements: List[BusyEngagementInfo] = Field(default_factory=list)
 
 
 class ChatHistoryResponse(BaseModel):

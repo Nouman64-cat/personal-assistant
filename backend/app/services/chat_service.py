@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.db.models import ChatMessage, ChatRole, ChatSession, EngagementCategory
-from app.schemas.chat import EngagementAction, EngagementActionType
+from app.schemas.chat import BusyEngagementInfo, EngagementAction, EngagementActionType
 from app.schemas.engagement import EngagementCreate, EngagementRead, EngagementUpdate
 from app.schemas.schedule import FreeSlotItem
 from app.services import engagement_service
@@ -43,6 +43,7 @@ class ChatTurnResult:
     reply: str
     actions: List[EngagementAction] = field(default_factory=list)
     free_slots: List[FreeSlotItem] = field(default_factory=list)
+    busy_engagements: List[BusyEngagementInfo] = field(default_factory=list)
 
 
 TOOLS = [
@@ -119,12 +120,26 @@ TOOLS = [
             "description": (
                 "Look up existing engagements to resolve references like 'that meeting' or 'the "
                 "interview tomorrow'. Always call this first if you don't already know the "
-                "engagement_id from earlier in this conversation. Never guess an id."
+                "engagement_id from earlier in this conversation. Never guess an id.\n\n"
+                "title_contains is a literal substring match against the stored title — it does NOT "
+                "understand synonyms, and the user's own words for the category (e.g. calling it 'the "
+                "interview') may not match what it was actually saved as (e.g. 'Meeting with Faraz'). "
+                "Search on the most distinctive fragment only — typically a person's name or a unique "
+                "word — never the user's full phrase, and never a category/type word alone. If a "
+                "search comes back empty, retry once with a shorter or different fragment (or omit "
+                "title_contains and use the date filters alone) before telling the user it can't be "
+                "found."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title_contains": {"type": "string"},
+                    "title_contains": {
+                        "type": "string",
+                        "description": (
+                            "A short, distinctive substring of the title (e.g. a name) — not the "
+                            "user's full sentence, and not a category word they may have gotten wrong."
+                        ),
+                    },
                     "start_after": {
                         "type": "string",
                         "description": "ISO-8601 timestamp, inclusive lower bound on start_time.",
@@ -145,14 +160,29 @@ TOOLS = [
             "name": "check_free_slots",
             "description": (
                 "Find open time slots within the user's working hours over a date range. The app "
-                "renders the returned slots itself as a visual list — don't itemize them again in "
-                "your reply."
+                "renders the returned slots itself as a visual list, including what's occupying the "
+                "busy stretches — don't itemize them again in your reply.\n\n"
+                "date_from/date_to must match only the scope the user actually asked for — never "
+                "pad or widen it. 'today' -> date_from == date_to == today. 'tomorrow' -> both == "
+                "tomorrow. 'this week' -> today through the end of this week. 'next 3 days' -> today "
+                "through today+2. An explicit date/weekday -> that single day (date_from == "
+                "date_to). If the user gave no range at all, default to today only — do not assume "
+                "a multi-day window they didn't ask for."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "date_from": {"type": "string", "description": "YYYY-MM-DD"},
-                    "date_to": {"type": "string", "description": "YYYY-MM-DD"},
+                    "date_from": {
+                        "type": "string",
+                        "description": "YYYY-MM-DD. The first day of exactly the range the user asked for.",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": (
+                            "YYYY-MM-DD. The last day of exactly the range the user asked for — equal to "
+                            "date_from for a single-day request such as 'today' or 'tomorrow'."
+                        ),
+                    },
                     "min_duration_minutes": {"type": "integer"},
                 },
                 "required": ["date_from", "date_to"],
@@ -274,7 +304,7 @@ def _localize_engagement(engagement_dump: dict, tzinfo: ZoneInfo) -> dict:
     return engagement_dump
 
 
-ToolResult = Tuple[dict, Optional[EngagementAction], List[FreeSlotItem]]
+ToolResult = Tuple[dict, Optional[EngagementAction], List[FreeSlotItem], List[BusyEngagementInfo]]
 
 
 def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
@@ -282,7 +312,7 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
     try:
         args = json.loads(tool_call.function.arguments or "{}")
     except json.JSONDecodeError as exc:
-        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None, []
+        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None, [], []
 
     try:
         if name == "create_engagement":
@@ -300,12 +330,12 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
                 engagement=EngagementRead.model_validate(engagement),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, []
+            return result, action, [], []
 
         if name == "update_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, []
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], []
             update_fields = {k: v for k, v in args.items() if k != "engagement_id"}
             payload = EngagementUpdate(**update_fields)
             engagement = engagement_service.update_engagement(session, engagement_id, payload)
@@ -314,19 +344,19 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
                 engagement=EngagementRead.model_validate(engagement),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, []
+            return result, action, [], []
 
         if name == "delete_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, []
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], []
             snapshot = engagement_service.delete_engagement(session, engagement_id)
             action = EngagementAction(
                 type=EngagementActionType.DELETED,
                 engagement=EngagementRead.model_validate(snapshot),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, []
+            return result, action, [], []
 
         if name == "list_engagements":
             results = engagement_service.list_engagements(
@@ -342,30 +372,40 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
                     _localize_engagement(EngagementRead.model_validate(e).model_dump(mode="json"), tzinfo)
                     for e in results
                 ],
-            }, None, []
+            }, None, [], []
 
         if name == "check_free_slots":
-            slots = resolve_free_slots_for_range(
+            range_result = resolve_free_slots_for_range(
                 session,
                 date_from=date.fromisoformat(args["date_from"]),
                 date_to=date.fromisoformat(args["date_to"]),
                 min_duration_minutes=int(args.get("min_duration_minutes") or 30),
-            )[:20]
+            )
             free_slots = [
                 FreeSlotItem(
                     start_time=_utc_to_local_iso(slot.start, tzinfo),
                     end_time=_utc_to_local_iso(slot.end, tzinfo),
                     duration_minutes=int((slot.end - slot.start).total_seconds() // 60),
                 )
-                for slot in slots
+                for slot in range_result.slots[:20]
+            ]
+            busy_engagements = [
+                BusyEngagementInfo(
+                    title=engagement.title,
+                    category=engagement.category,
+                    start_time=_utc_to_local_iso(engagement.start_time, tzinfo),
+                    end_time=_utc_to_local_iso(engagement.end_time, tzinfo),
+                )
+                for engagement in range_result.blocking_engagements[:50]
             ]
             result = {
                 "status": "ok",
                 "slots": [item.model_dump(mode="json") for item in free_slots],
+                "busy": [item.model_dump(mode="json") for item in busy_engagements],
             }
-            return result, None, free_slots
+            return result, None, free_slots, busy_engagements
 
-        return {"status": "error", "message": f"Unknown tool {name!r}"}, None, []
+        return {"status": "error", "message": f"Unknown tool {name!r}"}, None, [], []
 
     except (EngagementNotFoundError, EngagementConflictError) as exc:
         return {"status": "error", "message": str(exc)}, None, []
@@ -407,6 +447,7 @@ def send_message(
 
     actions: List[EngagementAction] = []
     free_slots: List[FreeSlotItem] = []
+    busy_engagements: List[BusyEngagementInfo] = []
 
     for _ in range(settings.CHAT_MAX_TOOL_ROUNDTRIPS):
         messages_for_api = [system_message] + _replay_messages(session, chat_session.id)
@@ -467,11 +508,13 @@ def send_message(
             session.commit()
 
             for tool_call in message.tool_calls:
-                result, action, slots = _execute_tool(session, tool_call, tzinfo)
+                result, action, slots, busy = _execute_tool(session, tool_call, tzinfo)
                 if action is not None:
                     actions.append(action)
                 if slots:
                     free_slots.extend(slots)
+                if busy:
+                    busy_engagements.extend(busy)
                 session.add(
                     ChatMessage(
                         session_id=chat_session.id,
@@ -493,11 +536,20 @@ def send_message(
                 content=reply,
                 actions_json=json.dumps([action.model_dump(mode="json") for action in actions]),
                 free_slots_json=json.dumps([slot.model_dump(mode="json") for slot in free_slots]),
+                busy_engagements_json=json.dumps(
+                    [engagement.model_dump(mode="json") for engagement in busy_engagements]
+                ),
             )
         )
         session.commit()
 
-        return ChatTurnResult(session_id=chat_session.id, reply=reply, actions=actions, free_slots=free_slots)
+        return ChatTurnResult(
+            session_id=chat_session.id,
+            reply=reply,
+            actions=actions,
+            free_slots=free_slots,
+            busy_engagements=busy_engagements,
+        )
 
     raise ChatServiceError(
         "Assistant could not complete this request after several tool calls", status_code=502
