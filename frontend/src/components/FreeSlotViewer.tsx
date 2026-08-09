@@ -9,6 +9,7 @@ import {
   CATEGORY_BLOCK_CLASSES,
   CATEGORY_LABELS,
   cn,
+  formatClockTime,
   formatDayLabel,
   formatDuration,
   formatMonthLabel,
@@ -74,6 +75,18 @@ interface BlockStyle {
   widthPct: number;
 }
 
+/** Per-day rollup used to render the month-grid cell's dots, count badge, free-time meter, numeric stats, and tooltip. */
+interface DaySummary {
+  categories: Set<EngagementCategory>;
+  categoryCounts: Map<EngagementCategory, number>;
+  hasFree: boolean;
+  freeMinutes: number;
+  busyMinutes: number;
+  engagementCount: number;
+  longestFree: (DayInterval & { minutes: number }) | null;
+  longestBusy: (DayInterval & { minutes: number }) | null;
+}
+
 function clipToWindow(
   start: Date,
   end: Date,
@@ -88,6 +101,83 @@ function clipToWindow(
   const leftPct = ((clippedStart.getTime() - windowStart.getTime()) / totalMs) * 100;
   const widthPct = ((clippedEnd.getTime() - clippedStart.getTime()) / totalMs) * 100;
   return { leftPct: Math.max(0, leftPct), widthPct: Math.max(0, widthPct) };
+}
+
+interface DayInterval {
+  start: Date;
+  end: Date;
+}
+
+/** Same clipping as `clipToWindow`, but keeps real timestamps instead of percentages — used for the day-stats numbers. */
+function clipInterval(start: Date, end: Date, windowStart: Date, windowEnd: Date): DayInterval | null {
+  if (end <= windowStart || start >= windowEnd) return null;
+  const clippedStart = start < windowStart ? windowStart : start;
+  const clippedEnd = end > windowEnd ? windowEnd : end;
+  return clippedEnd > clippedStart ? { start: clippedStart, end: clippedEnd } : null;
+}
+
+/** Collapses overlapping/back-to-back intervals (e.g. two adjacent meetings) into single busy stretches. */
+function mergeIntervals(intervals: DayInterval[]): DayInterval[] {
+  const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: DayInterval[] = [];
+  for (const interval of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && interval.start.getTime() <= last.end.getTime()) {
+      if (interval.end.getTime() > last.end.getTime()) last.end = interval.end;
+    } else {
+      merged.push({ ...interval });
+    }
+  }
+  return merged;
+}
+
+function intervalMinutes(interval: DayInterval): number {
+  return Math.round((interval.end.getTime() - interval.start.getTime()) / 60_000);
+}
+
+function longestInterval(intervals: DayInterval[]): (DayInterval & { minutes: number }) | null {
+  let best: (DayInterval & { minutes: number }) | null = null;
+  for (const interval of intervals) {
+    const minutes = intervalMinutes(interval);
+    if (!best || minutes > best.minutes) best = { ...interval, minutes };
+  }
+  return best;
+}
+
+interface DayStats {
+  freeMinutesTotal: number;
+  busyMinutesTotal: number;
+  longestFree: (DayInterval & { minutes: number }) | null;
+  longestBusy: (DayInterval & { minutes: number }) | null;
+}
+
+/**
+ * Numeric summary for the single-day drill-in view: total free/busy time
+ * across the calendar day, plus the single longest free window and longest
+ * unbroken busy stretch (adjacent/overlapping engagements merged first).
+ */
+function computeDayStats(day: Date, engagements: Engagement[], freeSlots: FreeSlotItem[]): DayStats {
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
+
+  const freeIntervals = freeSlots
+    .map((slot) => clipInterval(parseNaiveIso(slot.start_time), parseNaiveIso(slot.end_time), dayStart, dayEnd))
+    .filter((interval): interval is DayInterval => interval !== null);
+
+  const busyIntervals = mergeIntervals(
+    engagements
+      .map((engagement) =>
+        clipInterval(parseNaiveIso(engagement.start_time), parseNaiveIso(engagement.end_time), dayStart, dayEnd),
+      )
+      .filter((interval): interval is DayInterval => interval !== null),
+  );
+
+  return {
+    freeMinutesTotal: freeIntervals.reduce((sum, interval) => sum + intervalMinutes(interval), 0),
+    busyMinutesTotal: busyIntervals.reduce((sum, interval) => sum + intervalMinutes(interval), 0),
+    longestFree: longestInterval(freeIntervals),
+    longestBusy: longestInterval(busyIntervals),
+  };
 }
 
 export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlotViewerProps) {
@@ -161,30 +251,78 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
 
   const dayStartMinutes = hourStringToMinutes(dayStartHour);
   const dayEndMinutes = hourStringToMinutes(dayEndHour);
+  // Length of the daily shift window in minutes — the denominator for each
+  // month-grid cell's free-time meter. Overnight shifts wrap past midnight.
+  const shiftMinutes =
+    dayStartMinutes > dayEndMinutes ? 24 * 60 - dayStartMinutes + dayEndMinutes : dayEndMinutes - dayStartMinutes;
 
   const blockingEngagements = useMemo(
     () => engagements.filter((engagement) => engagement.is_blocking),
     [engagements],
   );
 
-  // Per-day summary (which categories are busy, whether there's any free
-  // time) used to render the small indicator dots on each month-grid cell.
+  // Per-day summary (categories present, free/busy totals, longest stretch of
+  // each) used to render the month-grid cell's dots, numeric stats, meter,
+  // and tooltip. Keyed by the date each engagement/slot *starts* on — good
+  // enough for an overview grid; the day-detail view clips to true day
+  // boundaries via `computeDayStats`.
   const daySummaries = useMemo(() => {
-    const map = new Map<string, { categories: Set<EngagementCategory>; hasFree: boolean }>();
+    const busyByDay = new Map<string, DayInterval[]>();
+    const freeByDay = new Map<string, DayInterval[]>();
+    const categoryInfoByDay = new Map<
+      string,
+      { categories: Set<EngagementCategory>; categoryCounts: Map<EngagementCategory, number>; engagementCount: number }
+    >();
+
     for (const engagement of blockingEngagements) {
-      const key = toDateKey(parseNaiveIso(engagement.start_time));
-      const entry = map.get(key) ?? { categories: new Set<EngagementCategory>(), hasFree: false };
-      entry.categories.add(engagement.category);
-      map.set(key, entry);
+      const start = parseNaiveIso(engagement.start_time);
+      const key = toDateKey(start);
+      const end = parseNaiveIso(engagement.end_time);
+      const intervals = busyByDay.get(key) ?? [];
+      intervals.push({ start, end });
+      busyByDay.set(key, intervals);
+
+      const catInfo =
+        categoryInfoByDay.get(key) ??
+        { categories: new Set<EngagementCategory>(), categoryCounts: new Map<EngagementCategory, number>(), engagementCount: 0 };
+      catInfo.categories.add(engagement.category);
+      catInfo.categoryCounts.set(engagement.category, (catInfo.categoryCounts.get(engagement.category) ?? 0) + 1);
+      catInfo.engagementCount += 1;
+      categoryInfoByDay.set(key, catInfo);
     }
+
     for (const slot of freeSlots) {
-      const key = toDateKey(parseNaiveIso(slot.start_time));
-      const entry = map.get(key) ?? { categories: new Set<EngagementCategory>(), hasFree: false };
-      entry.hasFree = true;
-      map.set(key, entry);
+      const start = parseNaiveIso(slot.start_time);
+      const key = toDateKey(start);
+      const intervals = freeByDay.get(key) ?? [];
+      intervals.push({ start, end: parseNaiveIso(slot.end_time) });
+      freeByDay.set(key, intervals);
+    }
+
+    const allKeys = new Set([...busyByDay.keys(), ...freeByDay.keys()]);
+    const map = new Map<string, DaySummary>();
+    for (const key of allKeys) {
+      const busyIntervals = mergeIntervals(busyByDay.get(key) ?? []);
+      const freeIntervals = freeByDay.get(key) ?? [];
+      const catInfo = categoryInfoByDay.get(key);
+      map.set(key, {
+        categories: catInfo?.categories ?? new Set<EngagementCategory>(),
+        categoryCounts: catInfo?.categoryCounts ?? new Map<EngagementCategory, number>(),
+        hasFree: freeIntervals.length > 0,
+        freeMinutes: freeIntervals.reduce((sum, interval) => sum + intervalMinutes(interval), 0),
+        busyMinutes: busyIntervals.reduce((sum, interval) => sum + intervalMinutes(interval), 0),
+        engagementCount: catInfo?.engagementCount ?? 0,
+        longestFree: longestInterval(freeIntervals),
+        longestBusy: longestInterval(busyIntervals),
+      });
     }
     return map;
   }, [blockingEngagements, freeSlots]);
+
+  const selectedDayStats = useMemo(() => {
+    if (!selectedDayKey) return null;
+    return computeDayStats(parseDateKey(selectedDayKey), blockingEngagements, freeSlots);
+  }, [selectedDayKey, blockingEngagements, freeSlots]);
 
   return (
     <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -204,18 +342,44 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
       )}
 
       {selectedDayKey ? (
-        <div className="mt-4 flex shrink-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setSelectedDayKey(null)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to month
-          </button>
-          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
-            {formatDayLabel(parseDateKey(selectedDayKey))}
-          </span>
+        <div className="mt-4 shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSelectedDayKey(null)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to month
+            </button>
+            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+              {formatDayLabel(parseDateKey(selectedDayKey))}
+            </span>
+          </div>
+          {selectedDayStats && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <StatChip label="Free" value={formatDuration(selectedDayStats.freeMinutesTotal)} tone="emerald" />
+              <StatChip label="Busy" value={formatDuration(selectedDayStats.busyMinutesTotal)} tone="red" />
+              {selectedDayStats.longestFree && (
+                <StatChip
+                  label="Longest free stretch"
+                  value={`${formatDuration(selectedDayStats.longestFree.minutes)} · ${formatClockTime(
+                    selectedDayStats.longestFree.start,
+                  )}–${formatClockTime(selectedDayStats.longestFree.end)}`}
+                  tone="emerald"
+                />
+              )}
+              {selectedDayStats.longestBusy && (
+                <StatChip
+                  label="Busiest stretch"
+                  value={`${formatDuration(selectedDayStats.longestBusy.minutes)} · ${formatClockTime(
+                    selectedDayStats.longestBusy.start,
+                  )}–${formatClockTime(selectedDayStats.longestBusy.end)}`}
+                  tone="red"
+                />
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div className="mt-4 flex shrink-0 items-center justify-between">
@@ -260,20 +424,99 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
             freeSlots={freeSlots}
           />
         ) : (
-          <MonthGrid monthCursor={monthCursor} daySummaries={daySummaries} onSelectDay={setSelectedDayKey} />
+          <MonthGrid
+            monthCursor={monthCursor}
+            daySummaries={daySummaries}
+            shiftMinutes={shiftMinutes}
+            onSelectDay={setSelectedDayKey}
+          />
         )}
       </div>
     </section>
   );
 }
 
+/** Small labeled pill for a single day-stat (free/busy totals, longest stretches). */
+function StatChip({ label, value, tone }: { label: string; value: string; tone: "emerald" | "red" }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs",
+        tone === "emerald"
+          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-500/10"
+          : "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-500/10",
+      )}
+    >
+      <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
+      <span
+        className={cn(
+          "font-semibold",
+          tone === "emerald" ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400",
+        )}
+      >
+        {value}
+      </span>
+    </span>
+  );
+}
+
+/** Turns per-category counts into a compact readable list, e.g. "Meeting ×2, Office Hours". */
+function formatCategoryBreakdown(categoryCounts: Map<EngagementCategory, number>): string {
+  const order: EngagementCategory[] = ["meeting", "interview", "office_hours", "personal"];
+  return order
+    .filter((category) => (categoryCounts.get(category) ?? 0) > 0)
+    .map((category) => {
+      const count = categoryCounts.get(category) ?? 0;
+      return count > 1 ? `${CATEGORY_LABELS[category]} ×${count}` : CATEGORY_LABELS[category];
+    })
+    .join(", ");
+}
+
+/** Native `title` text for a month-grid cell — a text-based fallback for anyone not reading the dots/meter by color. */
+function buildDayTooltip(day: Date, summary: DaySummary | undefined, freeFraction: number): string {
+  if (!summary) return formatDayLabel(day);
+  const breakdown = formatCategoryBreakdown(summary.categoryCounts);
+  const freeText =
+    summary.freeMinutes === 0 && summary.engagementCount > 0
+      ? "Fully booked"
+      : summary.engagementCount === 0 && freeFraction >= 0.99
+        ? "Open all day"
+        : summary.freeMinutes > 0
+          ? `${formatDuration(summary.freeMinutes)} free`
+          : null;
+  const busyText = summary.busyMinutes > 0 ? `${formatDuration(summary.busyMinutes)} busy` : null;
+  const detail = [breakdown, freeText, busyText].filter(Boolean).join(" • ") || "No events";
+  return `${formatDayLabel(day)}\n${detail}`;
+}
+
+/** Compact numeric hour label for tight grid cells, e.g. 405min -> "6.8h", 180min -> "3h", 0 -> "0h". */
+function formatCompactHours(minutes: number): string {
+  if (minutes <= 0) return "0h";
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+}
+
+/** Compact 12-hour clock label for tight grid cells, e.g. "6pm", "10:15am" — no space, but a full am/pm suffix so it isn't mistaken for a/p. */
+function formatCompactHour(date: Date): string {
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const twelveHour = hours % 12 === 0 ? 12 : hours % 12;
+  const suffix = hours < 12 ? "am" : "pm";
+  return minutes === 0 ? `${twelveHour}${suffix}` : `${twelveHour}:${String(minutes).padStart(2, "0")}${suffix}`;
+}
+
+function formatCompactRange(interval: DayInterval): string {
+  return `${formatCompactHour(interval.start)}–${formatCompactHour(interval.end)}`;
+}
+
 interface MonthGridProps {
   monthCursor: Date;
-  daySummaries: Map<string, { categories: Set<EngagementCategory>; hasFree: boolean }>;
+  daySummaries: Map<string, DaySummary>;
+  shiftMinutes: number;
   onSelectDay: (dateKey: string) => void;
 }
 
-function MonthGrid({ monthCursor, daySummaries, onSelectDay }: MonthGridProps) {
+function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: MonthGridProps) {
   const gridDays = useMemo(() => getMonthGridDays(monthCursor), [monthCursor]);
   const weeksCount = gridDays.length / 7;
   const todayDateKey = toDateKey(new Date());
@@ -299,17 +542,30 @@ function MonthGrid({ monthCursor, daySummaries, onSelectDay }: MonthGridProps) {
           const hasOfficeHours =
             summary?.categories.has("office_hours") || summary?.categories.has("personal") || false;
 
+          // Fraction of the daily shift window that's free — drives the meter bar below the dots.
+          const freeFraction = summary && shiftMinutes > 0 ? Math.min(1, summary.freeMinutes / shiftMinutes) : 0;
+          const isFullyOpen = Boolean(summary && summary.engagementCount === 0 && freeFraction >= 0.99);
+          const isFullyBooked = Boolean(summary && summary.freeMinutes === 0 && summary.engagementCount > 0);
+          const meterWidthPct = isFullyBooked ? 100 : Math.round(freeFraction * 100);
+
           return (
             <button
               key={dateKey}
               type="button"
               disabled={!inCurrentMonth}
               onClick={() => onSelectDay(dateKey)}
+              title={inCurrentMonth ? buildDayTooltip(day, summary, freeFraction) : undefined}
               className={cn(
-                "flex flex-col items-start gap-1.5 rounded-lg border p-2 text-left transition",
+                "relative flex flex-col items-start gap-1.5 rounded-lg border p-2 pb-3.5 text-left transition",
                 inCurrentMonth
                   ? "border-zinc-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/5"
                   : "cursor-default border-transparent bg-transparent",
+                inCurrentMonth &&
+                  isFullyOpen &&
+                  "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-500/5",
+                inCurrentMonth &&
+                  isFullyBooked &&
+                  "border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-500/5",
                 isToday && "ring-2 ring-inset ring-emerald-500",
               )}
             >
@@ -321,11 +577,55 @@ function MonthGrid({ monthCursor, daySummaries, onSelectDay }: MonthGridProps) {
               >
                 {day.getDate()}
               </span>
+
+              {inCurrentMonth && summary && summary.engagementCount > 1 && (
+                <span className="absolute right-1.5 top-1.5 text-[10px] font-medium tabular-nums text-zinc-400 dark:text-zinc-600">
+                  {summary.engagementCount}
+                </span>
+              )}
+
               {inCurrentMonth && (hasMeeting || hasOfficeHours || summary?.hasFree) && (
                 <span className="flex gap-1">
                   {hasMeeting && <span className="h-1.5 w-1.5 rounded-full bg-red-500" />}
                   {hasOfficeHours && <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
                   {summary?.hasFree && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                </span>
+              )}
+
+              {inCurrentMonth && summary && (summary.freeMinutes > 0 || summary.busyMinutes > 0) && (
+                <span className="flex w-full min-w-0 items-center gap-1 truncate text-[9px] font-semibold leading-none tabular-nums">
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    {formatCompactHours(summary.freeMinutes)}
+                  </span>
+                  <span className="text-zinc-300 dark:text-zinc-700">/</span>
+                  <span className="text-red-500 dark:text-red-400">{formatCompactHours(summary.busyMinutes)}</span>
+                </span>
+              )}
+
+              {inCurrentMonth && summary && (summary.longestFree || summary.longestBusy) && (
+                <span className="flex w-full min-w-0 items-center gap-1 truncate text-[9px] leading-none tabular-nums">
+                  {summary.longestFree && (
+                    <span className="shrink-0 text-emerald-600/70 dark:text-emerald-400/70">
+                      {formatCompactRange(summary.longestFree)}
+                    </span>
+                  )}
+                  {summary.longestBusy && (
+                    <span className="truncate text-red-500/70 dark:text-red-400/70">
+                      {formatCompactRange(summary.longestBusy)}
+                    </span>
+                  )}
+                </span>
+              )}
+
+              {inCurrentMonth && summary && shiftMinutes > 0 && (
+                <span className="absolute inset-x-1.5 bottom-1.5 h-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+                  <span
+                    className={cn(
+                      "block h-full rounded-full",
+                      isFullyBooked ? "bg-red-400 dark:bg-red-500/80" : "bg-emerald-500 dark:bg-emerald-500/90",
+                    )}
+                    style={{ width: `${meterWidthPct}%` }}
+                  />
                 </span>
               )}
             </button>

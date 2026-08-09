@@ -66,11 +66,27 @@ TOOLS = [
                     "description": {"type": "string"},
                     "start_time": {
                         "type": "string",
-                        "description": "ISO-8601 timestamp including a UTC offset, e.g. '2026-08-11T15:00:00+00:00'.",
+                        "description": (
+                            "Local wall-clock date and time, with NO UTC offset — just the digits "
+                            "as stated, e.g. '2026-08-11T15:00:00' for 3pm. Never compute or attach "
+                            "a UTC offset yourself; `timezone` below carries the zone instead."
+                        ),
                     },
                     "end_time": {
                         "type": "string",
-                        "description": "ISO-8601 timestamp including a UTC offset.",
+                        "description": "Local wall-clock date and time, no UTC offset — same rules as start_time.",
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": (
+                            "IANA timezone name that start_time/end_time's clock digits are in, e.g. "
+                            "'Asia/Karachi'. Defaults to the user's own timezone (given in the system "
+                            "prompt) — only set this to something else when the user explicitly named "
+                            "a different zone for this event (an abbreviation, UTC offset, or "
+                            "city/region). Resolve abbreviations to their IANA name yourself: "
+                            "EST/EDT = America/New_York, CST/CDT = America/Chicago, "
+                            "MST/MDT = America/Denver, PST/PDT = America/Los_Angeles."
+                        ),
                     },
                     "category": {"type": "string", "enum": [c.value for c in EngagementCategory]},
                     "is_blocking": {"type": "boolean"},
@@ -90,8 +106,18 @@ TOOLS = [
                     "engagement_id": {"type": "string", "description": "UUID of the engagement to update."},
                     "title": {"type": "string"},
                     "description": {"type": "string"},
-                    "start_time": {"type": "string", "description": "ISO-8601 timestamp with UTC offset."},
-                    "end_time": {"type": "string", "description": "ISO-8601 timestamp with UTC offset."},
+                    "start_time": {
+                        "type": "string",
+                        "description": "Local wall-clock date and time, no UTC offset — see create_engagement.",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "Local wall-clock date and time, no UTC offset — see create_engagement.",
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "IANA zone for start_time/end_time — see create_engagement. Only needed when start_time or end_time is being changed.",
+                    },
                     "category": {"type": "string", "enum": [c.value for c in EngagementCategory]},
                     "is_blocking": {"type": "boolean"},
                 },
@@ -198,11 +224,19 @@ def _build_system_prompt(reference_datetime: datetime, timezone_name: str) -> st
         "conversation. Use the provided tools to create, edit, delete, and look up engagements, "
         "and to check free time slots — never claim to have done something without calling the "
         "matching tool. Resolve relative or vague date/time expressions (e.g. 'tomorrow at 3pm', "
-        "'next Tuesday') using the reference datetime below as 'now'. Always pass start_time/"
-        "end_time to tools as ISO-8601 timestamps including a UTC offset. Timestamps that tools "
-        "return to you (engagements, free slots) are already in the user's local timezone (given "
-        "below), each with that zone's own UTC offset — read the wall-clock digits directly when "
+        "'next Tuesday') using the reference datetime below as 'now'. Timestamps that tools return "
+        "to you (engagements, free slots) are already in the user's local timezone (given below), "
+        "each with that zone's own UTC offset — read the wall-clock digits directly when "
         "describing them, no conversion needed.\n\n"
+        "For create_engagement/update_engagement, give start_time/end_time as bare local "
+        "wall-clock digits with NO UTC offset — never compute or attach one yourself, and never "
+        "convert a stated time into another zone's clock digits by hand. Instead, pass the "
+        "separate `timezone` field naming whichever IANA zone those digits are actually in: the "
+        "user's own timezone (given below) by default, or the specific zone they explicitly named "
+        "for that event otherwise (an abbreviation, UTC offset, or city/region — resolve it to its "
+        "IANA name yourself, e.g. EST/EDT = America/New_York). The app converts everything to the "
+        "correct absolute instant deterministically from those two pieces — offset arithmetic and "
+        "daylight saving are not something you need to reason about.\n\n"
         "When the user refers to an existing engagement ('that meeting', 'the interview'), "
         "resolve it via list_engagements (or an id you already learned earlier in this "
         "conversation) before calling update_engagement or delete_engagement — never guess an id. "
@@ -283,6 +317,46 @@ def _parse_optional_datetime(value: object) -> Optional[datetime]:
         return None
 
 
+def _resolve_event_timezone(tz_name: object, default_tzinfo: ZoneInfo) -> ZoneInfo:
+    """The zone an engagement's start_time/end_time digits are stated in.
+
+    Falls back to the user's own reference timezone when the model omitted
+    `timezone` (the common case — most events are in the user's own zone) or
+    named something `zoneinfo` doesn't recognize, rather than failing the
+    whole request over a bad zone name.
+    """
+    if isinstance(tz_name, str) and tz_name:
+        try:
+            return ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            pass
+    return default_tzinfo
+
+
+def _localize_tool_datetime(value: object, event_tzinfo: ZoneInfo) -> object:
+    """Attach the resolved event timezone to a model-supplied local clock time.
+
+    The model is asked for bare wall-clock digits (no offset) plus a
+    separate IANA `timezone` name — `zoneinfo` then does the actual
+    DST-aware UTC conversion deterministically, rather than asking the model
+    to compute a UTC offset itself. That arithmetic (especially across an
+    unusual pair like PKT and a US zone, with its own date-rollover) is
+    exactly the kind of exact computation LLMs get wrong often enough to be
+    untrustworthy for something that would otherwise silently corrupt a
+    stored time. A value that already carries its own offset — the model
+    ignoring instructions — is left untouched rather than double-converted.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if parsed.tzinfo is not None:
+        return value
+    return parsed.replace(tzinfo=event_tzinfo).isoformat()
+
+
 def _utc_to_local_iso(value: datetime, tzinfo: ZoneInfo) -> str:
     """Convert a naive UTC datetime to an ISO string in the user's local zone.
 
@@ -316,11 +390,12 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
 
     try:
         if name == "create_engagement":
+            event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
             payload = EngagementCreate(
                 title=args["title"],
                 description=args.get("description"),
-                start_time=args["start_time"],
-                end_time=args["end_time"],
+                start_time=_localize_tool_datetime(args["start_time"], event_tzinfo),
+                end_time=_localize_tool_datetime(args["end_time"], event_tzinfo),
                 category=args["category"],
                 is_blocking=args.get("is_blocking", True),
             )
@@ -336,7 +411,11 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
                 return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], []
-            update_fields = {k: v for k, v in args.items() if k != "engagement_id"}
+            event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
+            update_fields = {k: v for k, v in args.items() if k not in ("engagement_id", "timezone")}
+            for key in ("start_time", "end_time"):
+                if key in update_fields:
+                    update_fields[key] = _localize_tool_datetime(update_fields[key], event_tzinfo)
             payload = EngagementUpdate(**update_fields)
             engagement = engagement_service.update_engagement(session, engagement_id, payload)
             action = EngagementAction(
