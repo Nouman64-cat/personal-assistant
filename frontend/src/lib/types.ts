@@ -28,25 +28,37 @@ export interface EngagementInput {
   is_blocking?: boolean;
 }
 
-export interface ParsedEngagement {
-  title: string;
-  description: string | null;
-  start_time: string;
-  end_time: string;
-  category: EngagementCategory;
-  is_blocking: boolean;
-  has_conflict: boolean;
+export type EngagementActionType = "created" | "updated" | "deleted";
+
+export interface EngagementAction {
+  type: EngagementActionType;
+  /** For a "deleted" action, this is a snapshot taken just before removal. */
+  engagement: Engagement;
 }
 
-export interface ParseRequest {
-  text: string;
+export interface ChatMessageRequest {
+  session_id?: string | null;
+  message: string;
   timezone?: string;
   reference_datetime?: string;
 }
 
-export interface ParseResponse {
-  engagements: ParsedEngagement[];
-  warnings: string[];
+export interface ChatMessageResponse {
+  session_id: string;
+  reply: string;
+  actions: EngagementAction[];
+}
+
+export interface ChatHistoryMessageDto {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  actions: EngagementAction[];
+}
+
+export interface ChatHistoryResponse {
+  session_id: string;
+  messages: ChatHistoryMessageDto[];
 }
 
 export interface FreeSlotItem {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarClock, Loader2, RefreshCw } from "lucide-react";
 
 import { ApiError, getFreeSlots, listEngagements } from "@/lib/api";
@@ -8,11 +8,11 @@ import type { Engagement, FreeSlotItem, ShiftSettings } from "@/lib/types";
 import {
   CATEGORY_BLOCK_CLASSES,
   CATEGORY_LABELS,
-  formatClockTime,
   formatDayLabel,
   formatDuration,
   formatTime,
   hourStringToMinutes,
+  minutesSinceMidnight,
   parseDateKey,
   parseNaiveIso,
   toDateKey,
@@ -246,28 +246,26 @@ export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlot
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">
+        <LegendDot colorClass="bg-indigo-400/40 dark:bg-indigo-400/30" label="Shift hours" />
         <LegendDot colorClass="bg-emerald-500" label="Free" />
         <LegendDot colorClass="bg-red-500" label="Meeting / Interview" />
         <LegendDot colorClass="bg-orange-500" label="Office Hours / Personal" />
       </div>
 
-      <div className="mt-4 space-y-5">
-        {days.length === 0 && !error && (
+      <div className="mt-4">
+        {days.length === 0 && !error ? (
           <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
             Choose a valid date range to see availability.
           </p>
-        )}
-
-        {days.map((day) => (
-          <DayRow
-            key={toDateKey(day)}
-            day={day}
+        ) : (
+          <CalendarGrid
+            days={days}
             dayStartMinutes={dayStartMinutes}
             dayEndMinutes={dayEndMinutes}
             engagements={blockingEngagements}
             freeSlots={freeSlots}
           />
-        ))}
+        )}
       </div>
     </section>
   );
@@ -296,7 +294,143 @@ function LegendDot({ colorClass, label }: { colorClass: string; label: string })
   );
 }
 
-interface DayRowProps {
+const HOUR_HEIGHT_PX = 48;
+const GRID_HEIGHT_PX = HOUR_HEIGHT_PX * 24;
+const DAY_COLUMN_MIN_WIDTH_PX = 130;
+const HOUR_LABEL_COLUMN_WIDTH_PX = 52;
+/** Height of the sticky day-header row above the hour grid — the scroll-to-shift effect has to offset by this. */
+const HEADER_ROW_HEIGHT_PX = 48;
+
+function minutesToDate(base: Date, minutes: number): Date {
+  return new Date(base.getTime() + minutes * 60_000);
+}
+
+function formatHourLabel(hour: number): string {
+  if (hour === 0) return "12 AM";
+  if (hour === 12) return "12 PM";
+  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
+}
+
+/** A block positioned vertically in a day column, as top/height percentages of the 24h grid. */
+interface PositionedBlock<T> {
+  item: T;
+  topPct: number;
+  heightPct: number;
+}
+
+/** Same block, additionally assigned a side-by-side column among whatever else overlaps it. */
+interface LaidOutBlock<T> extends PositionedBlock<T> {
+  col: number;
+  cols: number;
+}
+
+/**
+ * Groups overlapping blocks into clusters and greedily assigns each one a
+ * side-by-side column within its cluster, so concurrent engagements render
+ * next to each other (like Google Calendar) instead of stacking on top.
+ */
+function layoutOverlaps<T>(blocks: PositionedBlock<T>[]): LaidOutBlock<T>[] {
+  const sorted = [...blocks].sort((a, b) => a.topPct - b.topPct);
+  const result: LaidOutBlock<T>[] = [];
+
+  let cluster: PositionedBlock<T>[] = [];
+  let clusterEndPct = -Infinity;
+
+  function flushCluster() {
+    if (cluster.length === 0) return;
+    const columnEndPcts: number[] = [];
+    for (const block of cluster) {
+      let col = columnEndPcts.findIndex((end) => end <= block.topPct);
+      if (col === -1) {
+        col = columnEndPcts.length;
+        columnEndPcts.push(block.topPct + block.heightPct);
+      } else {
+        columnEndPcts[col] = block.topPct + block.heightPct;
+      }
+      result.push({ ...block, col, cols: -1 });
+    }
+    const cols = columnEndPcts.length;
+    for (let i = result.length - cluster.length; i < result.length; i++) {
+      result[i] = { ...result[i], cols };
+    }
+    cluster = [];
+  }
+
+  for (const block of sorted) {
+    if (cluster.length === 0 || block.topPct < clusterEndPct) {
+      cluster.push(block);
+      clusterEndPct = Math.max(clusterEndPct, block.topPct + block.heightPct);
+    } else {
+      flushCluster();
+      cluster = [block];
+      clusterEndPct = block.topPct + block.heightPct;
+    }
+  }
+  flushCluster();
+
+  return result;
+}
+
+interface CalendarGridProps {
+  days: Date[];
+  dayStartMinutes: number;
+  dayEndMinutes: number;
+  engagements: Engagement[];
+  freeSlots: FreeSlotItem[];
+}
+
+function CalendarGrid({ days, dayStartMinutes, dayEndMinutes, engagements, freeSlots }: CalendarGridProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const target = HEADER_ROW_HEIGHT_PX + Math.max(0, (dayStartMinutes / 60 - 1) * HOUR_HEIGHT_PX);
+    scrollRef.current.scrollTop = target;
+  }, [dayStartMinutes, dayEndMinutes]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="overflow-auto rounded-lg border border-zinc-200 dark:border-zinc-700"
+      style={{ maxHeight: 560 }}
+    >
+      <div className="flex" style={{ minWidth: HOUR_LABEL_COLUMN_WIDTH_PX + days.length * DAY_COLUMN_MIN_WIDTH_PX }}>
+        <div
+          className="sticky left-0 z-20 shrink-0 bg-white dark:bg-zinc-900"
+          style={{ width: HOUR_LABEL_COLUMN_WIDTH_PX }}
+        >
+          <div className="sticky top-0 z-30 h-12 border-b border-r border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/60" />
+          <div className="relative border-r border-zinc-200 dark:border-zinc-700" style={{ height: GRID_HEIGHT_PX }}>
+            {Array.from({ length: 24 }, (_, hour) => (
+              <span
+                key={hour}
+                className="absolute right-1.5 whitespace-nowrap text-[10px] text-zinc-400 dark:text-zinc-500"
+                style={{ top: hour * HOUR_HEIGHT_PX, transform: hour === 0 ? undefined : "translateY(-50%)" }}
+              >
+                {formatHourLabel(hour)}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-1">
+          {days.map((day) => (
+            <DayColumn
+              key={toDateKey(day)}
+              day={day}
+              dayStartMinutes={dayStartMinutes}
+              dayEndMinutes={dayEndMinutes}
+              engagements={engagements}
+              freeSlots={freeSlots}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface DayColumnProps {
   day: Date;
   dayStartMinutes: number;
   dayEndMinutes: number;
@@ -304,90 +438,113 @@ interface DayRowProps {
   freeSlots: FreeSlotItem[];
 }
 
-function DayRow({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots }: DayRowProps) {
-  // dayStartMinutes > dayEndMinutes means this row's window is overnight
-  // (e.g. 18:00 to 02:00) — the end falls on the *next* calendar day.
+function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots }: DayColumnProps) {
+  // dayStartMinutes > dayEndMinutes means the shift is overnight (e.g. 18:00
+  // to 02:00) — it recurs daily as two segments: the evening it starts, and
+  // the tail end carrying into the following morning.
   const isOvernight = dayStartMinutes > dayEndMinutes;
 
-  const windowStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0);
-  windowStart.setMinutes(dayStartMinutes);
-  const windowEnd = new Date(
-    day.getFullYear(),
-    day.getMonth(),
-    day.getDate() + (isOvernight ? 1 : 0),
-    0,
-    0,
-    0,
-  );
-  windowEnd.setMinutes(dayEndMinutes);
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0);
+  const dayEnd = minutesToDate(dayStart, 24 * 60);
 
-  const busyBlocks = engagements
-    .map((engagement) => {
-      const style = clipToWindow(
-        parseNaiveIso(engagement.start_time),
-        parseNaiveIso(engagement.end_time),
-        windowStart,
-        windowEnd,
-      );
-      return style ? { engagement, style } : null;
-    })
-    .filter((entry): entry is { engagement: Engagement; style: BlockStyle } => entry !== null);
+  const shiftBlocks = (
+    isOvernight ? [[dayStartMinutes, 24 * 60], [0, dayEndMinutes]] : [[dayStartMinutes, dayEndMinutes]]
+  )
+    .map(([start, end]) =>
+      clipToWindow(minutesToDate(dayStart, start), minutesToDate(dayStart, end), dayStart, dayEnd),
+    )
+    .filter((style): style is BlockStyle => style !== null)
+    .map((style) => ({ topPct: style.leftPct, heightPct: style.widthPct }));
 
   const freeBlocks = freeSlots
     .map((slot) => {
-      const style = clipToWindow(
-        parseNaiveIso(slot.start_time),
-        parseNaiveIso(slot.end_time),
-        windowStart,
-        windowEnd,
-      );
-      return style ? { slot, style } : null;
+      const style = clipToWindow(parseNaiveIso(slot.start_time), parseNaiveIso(slot.end_time), dayStart, dayEnd);
+      return style ? { item: slot, topPct: style.leftPct, heightPct: style.widthPct } : null;
     })
-    .filter((entry): entry is { slot: FreeSlotItem; style: BlockStyle } => entry !== null);
+    .filter((entry): entry is PositionedBlock<FreeSlotItem> => entry !== null);
 
-  const hasContent = busyBlocks.length > 0 || freeBlocks.length > 0;
+  const busyBlocks = layoutOverlaps(
+    engagements
+      .map((engagement) => {
+        const style = clipToWindow(
+          parseNaiveIso(engagement.start_time),
+          parseNaiveIso(engagement.end_time),
+          dayStart,
+          dayEnd,
+        );
+        return style ? { item: engagement, topPct: style.leftPct, heightPct: style.widthPct } : null;
+      })
+      .filter((entry): entry is PositionedBlock<Engagement> => entry !== null),
+  );
+
+  const isToday = toDateKey(day) === toDateKey(new Date());
+  const nowTopPct = isToday ? (minutesSinceMidnight(new Date()) / (24 * 60)) * 100 : null;
 
   return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between text-xs">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">{formatDayLabel(day)}</span>
-        <span className="text-zinc-400 dark:text-zinc-500">
-          {formatClockTime(windowStart)} – {formatClockTime(windowEnd)}
-          {isOvernight && " (+1 day)"}
-        </span>
+    <div className="relative min-w-0 flex-1 border-l border-zinc-200 first:border-l-0 dark:border-zinc-700">
+      <div className="sticky top-0 z-10 h-12 border-b border-zinc-200 bg-zinc-50 px-2 py-2 text-center dark:border-zinc-700 dark:bg-zinc-800/60">
+        <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{formatDayLabel(day)}</span>
       </div>
-      <div className="relative h-11 w-full overflow-hidden rounded-lg bg-zinc-100 ring-1 ring-inset ring-zinc-200 dark:bg-zinc-800 dark:ring-zinc-700">
-        {!hasContent && (
-          <span className="absolute inset-0 flex items-center justify-center text-[11px] text-zinc-400 dark:text-zinc-500">
-            No engagements or availability in this window
-          </span>
-        )}
-        {freeBlocks.map(({ slot, style }, index) => (
+
+      <div className="relative" style={{ height: GRID_HEIGHT_PX }}>
+        {Array.from({ length: 23 }, (_, index) => (
+          <div
+            key={index}
+            className="absolute inset-x-0 border-t border-zinc-100 dark:border-zinc-800"
+            style={{ top: (index + 1) * HOUR_HEIGHT_PX }}
+          />
+        ))}
+
+        {shiftBlocks.map((block, index) => (
+          <div
+            key={`shift-${index}`}
+            className="absolute inset-x-0 z-0 bg-indigo-400/30 dark:bg-indigo-400/15"
+            style={{ top: `${block.topPct}%`, height: `${block.heightPct}%` }}
+          />
+        ))}
+
+        {freeBlocks.map(({ item: slot, topPct, heightPct }, index) => (
           <div
             key={`free-${index}`}
             title={`Free: ${formatTime(slot.start_time)} – ${formatTime(slot.end_time)} (${formatDuration(
               slot.duration_minutes,
             )})`}
-            className="absolute inset-y-0 flex items-center overflow-hidden bg-emerald-500 px-1.5 text-[11px] font-medium text-white dark:bg-emerald-500/90"
-            style={{ left: `${style.leftPct}%`, width: `${style.widthPct}%` }}
+            className="absolute inset-x-1 z-10 overflow-hidden rounded-md bg-emerald-500 px-1.5 py-0.5 text-[11px] font-medium text-white dark:bg-emerald-500/90"
+            style={{ top: `${topPct}%`, height: `${heightPct}%` }}
           >
-            {style.widthPct > 8 && (
-              <span className="truncate">{formatDuration(slot.duration_minutes)}</span>
-            )}
+            {heightPct > 3 && <span className="truncate">{formatDuration(slot.duration_minutes)}</span>}
           </div>
         ))}
-        {busyBlocks.map(({ engagement, style }) => (
+
+        {busyBlocks.map(({ item: engagement, topPct, heightPct, col, cols }) => (
           <div
             key={engagement.id}
             title={`${engagement.title} — ${CATEGORY_LABELS[engagement.category]} (${formatTime(
               engagement.start_time,
             )} – ${formatTime(engagement.end_time)})`}
-            className={`absolute inset-y-0 flex items-center overflow-hidden px-1.5 text-[11px] font-medium text-white ${CATEGORY_BLOCK_CLASSES[engagement.category]}`}
-            style={{ left: `${style.leftPct}%`, width: `${style.widthPct}%` }}
+            className={`absolute z-20 overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] font-medium text-white ${CATEGORY_BLOCK_CLASSES[engagement.category]}`}
+            style={{
+              top: `${topPct}%`,
+              height: `${heightPct}%`,
+              left: `calc(${(col / cols) * 100}% + 2px)`,
+              width: `calc(${100 / cols}% - 4px)`,
+            }}
           >
-            {style.widthPct > 8 && <span className="truncate">{engagement.title}</span>}
+            <span className="block truncate">{engagement.title}</span>
+            {heightPct > 4 && (
+              <span className="block truncate text-[10px] text-white/80">
+                {formatTime(engagement.start_time)}
+              </span>
+            )}
           </div>
         ))}
+
+        {nowTopPct !== null && (
+          <div className="absolute inset-x-0 z-30" style={{ top: `${nowTopPct}%` }}>
+            <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-red-500" />
+            <div className="border-t-2 border-red-500" />
+          </div>
+        )}
       </div>
     </div>
   );

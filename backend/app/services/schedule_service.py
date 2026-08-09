@@ -5,7 +5,11 @@ from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Sequence
 from uuid import UUID
 
+from sqlmodel import Session, select
+
+from app.core.time_utils import local_time_to_utc
 from app.db.models import Engagement
+from app.services.settings_service import get_or_create_shift_settings
 
 
 @dataclass(frozen=True)
@@ -130,3 +134,62 @@ def get_free_slots(
         free_slots = [slot for slot in free_slots if slot.end - slot.start >= min_duration]
 
     return free_slots
+
+
+def resolve_free_slots_for_range(
+    session: Session,
+    date_from: date,
+    date_to: date,
+    day_start_hour: Optional[time] = None,
+    day_end_hour: Optional[time] = None,
+    min_duration_minutes: int = 30,
+) -> List[Interval]:
+    """Compute free slots for a date range, falling back to the saved shift
+    for any window bound left unspecified. Shared by the /free-slots REST
+    endpoint and the chat `check_free_slots` tool so the overnight-window
+    boundary math (see `test_availability_endpoint.py`) only lives once.
+    """
+    if date_from > date_to:
+        raise ValueError("date_from must not be after date_to")
+
+    if day_start_hour is None or day_end_hour is None:
+        shift = get_or_create_shift_settings(session)
+        if day_start_hour is None:
+            day_start_hour = local_time_to_utc(date_from, shift.day_start_hour, shift.timezone)
+        if day_end_hour is None:
+            day_end_hour = local_time_to_utc(date_from, shift.day_end_hour, shift.timezone)
+
+    if day_start_hour == day_end_hour:
+        raise ValueError("day_start_hour and day_end_hour must not be equal")
+
+    overnight = day_start_hour > day_end_hour
+    start_range = datetime.combine(date_from, time.min)
+    # For an overnight window, `date_to` means "the last day a shift may
+    # *start*" — its tail extends into the next calendar day. Bounding
+    # end_range at exactly that natural tail (rather than end-of-day-to)
+    # avoids two failure modes: clipping the last night short, or (if we
+    # instead just used end-of-day on date_to + 1) spuriously picking up the
+    # first sliver of an unwanted extra night starting on date_to + 1.
+    end_range = (
+        datetime.combine(date_to + timedelta(days=1), day_end_hour)
+        if overnight
+        else datetime.combine(date_to, time.max)
+    )
+
+    blocking_engagements = session.exec(
+        select(Engagement).where(
+            Engagement.is_blocking == True,  # noqa: E712
+            Engagement.start_time < end_range,
+            Engagement.end_time > start_range,
+        )
+    ).all()
+
+    return get_free_slots(
+        start_range=start_range,
+        end_range=end_range,
+        existing_engagements=blocking_engagements,
+        working_hours_start=day_start_hour,
+        working_hours_end=day_end_hour,
+        buffer_minutes=0,
+        min_duration_minutes=min_duration_minutes,
+    )

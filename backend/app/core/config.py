@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_REQUEST_TIMEOUT_SECONDS: float = 30.0
+    CHAT_MAX_TOOL_ROUNDTRIPS: int = 5
 
 
 settings = Settings()

@@ -1,10 +1,11 @@
 import type {
+  ChatHistoryResponse,
+  ChatMessageRequest,
+  ChatMessageResponse,
   Engagement,
   EngagementInput,
   FreeSlotsParams,
   FreeSlotsResponse,
-  ParseRequest,
-  ParseResponse,
   ShiftSettings,
   ShiftSettingsInput,
 } from "@/lib/types";
@@ -93,13 +94,17 @@ export function deleteEngagement(id: string): Promise<void> {
   return request<void>(`/engagements/${id}`, { method: "DELETE" });
 }
 
-// --- Natural language parsing ----------------------------------------------
+// --- Chat --------------------------------------------------------------------
 
-export function parseEngagements(payload: ParseRequest): Promise<ParseResponse> {
-  return request<ParseResponse>("/parse", {
+export function sendChatMessage(payload: ChatMessageRequest): Promise<ChatMessageResponse> {
+  return request<ChatMessageResponse>("/chat/messages", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function getChatHistory(sessionId: string): Promise<ChatHistoryResponse> {
+  return request<ChatHistoryResponse>(`/chat/${sessionId}/messages`);
 }
 
 // --- Availability ------------------------------------------------------------

@@ -78,7 +78,7 @@ export default function EngagementList({ refreshSignal, onChanged }: EngagementL
         ) : sorted.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
             <CalendarX2 className="h-6 w-6" />
-            Nothing scheduled yet. Try Quick Parse above.
+            Nothing scheduled yet. Try the Chat page to add something.
           </div>
         ) : (
           sorted.map((engagement) => (

@@ -1,10 +1,9 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
 
-from app.core.time_utils import local_time_to_utc
 from app.db.database import get_session
 from app.db.models import Engagement
 from app.schemas.schedule import (
@@ -13,8 +12,7 @@ from app.schemas.schedule import (
     FreeSlotItem,
     FreeSlotsResponse,
 )
-from app.services.schedule_service import check_conflict, get_free_slots
-from app.services.settings_service import get_or_create_shift_settings
+from app.services.schedule_service import check_conflict, resolve_free_slots_for_range
 
 router = APIRouter()
 
@@ -39,56 +37,17 @@ def free_slots(
     ),
     session: Session = Depends(get_session),
 ) -> FreeSlotsResponse:
-    if date_from > date_to:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="date_from must not be after date_to",
+    try:
+        slots = resolve_free_slots_for_range(
+            session,
+            date_from=date_from,
+            date_to=date_to,
+            day_start_hour=day_start_hour,
+            day_end_hour=day_end_hour,
+            min_duration_minutes=min_duration_minutes,
         )
-
-    if day_start_hour is None or day_end_hour is None:
-        shift = get_or_create_shift_settings(session)
-        if day_start_hour is None:
-            day_start_hour = local_time_to_utc(date_from, shift.day_start_hour, shift.timezone)
-        if day_end_hour is None:
-            day_end_hour = local_time_to_utc(date_from, shift.day_end_hour, shift.timezone)
-
-    if day_start_hour == day_end_hour:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="day_start_hour and day_end_hour must not be equal",
-        )
-
-    overnight = day_start_hour > day_end_hour
-    start_range = datetime.combine(date_from, time.min)
-    # For an overnight window, `date_to` means "the last day a shift may
-    # *start*" — its tail extends into the next calendar day. Bounding
-    # end_range at exactly that natural tail (rather than end-of-day-to)
-    # avoids two failure modes: clipping the last night short, or (if we
-    # instead just used end-of-day on date_to + 1) spuriously picking up the
-    # first sliver of an unwanted extra night starting on date_to + 1.
-    end_range = (
-        datetime.combine(date_to + timedelta(days=1), day_end_hour)
-        if overnight
-        else datetime.combine(date_to, time.max)
-    )
-
-    blocking_engagements = session.exec(
-        select(Engagement).where(
-            Engagement.is_blocking == True,  # noqa: E712
-            Engagement.start_time < end_range,
-            Engagement.end_time > start_range,
-        )
-    ).all()
-
-    slots = get_free_slots(
-        start_range=start_range,
-        end_range=end_range,
-        existing_engagements=blocking_engagements,
-        working_hours_start=day_start_hour,
-        working_hours_end=day_end_hour,
-        buffer_minutes=0,
-        min_duration_minutes=min_duration_minutes,
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     return FreeSlotsResponse(
         slots=[
