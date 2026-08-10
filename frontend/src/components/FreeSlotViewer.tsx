@@ -349,6 +349,17 @@ export default function FreeSlotViewer({ refreshSignal, initialShift, focusReque
     return computeDayStats(parseDateKey(selectedDayKey), blockingEngagements, freeSlots);
   }, [selectedDayKey, blockingEngagements, freeSlots]);
 
+  // Steps the day-detail view to the adjacent date, keeping the month cursor
+  // in sync so "Back to month" lands on the right page if it crosses a
+  // month boundary.
+  function goToAdjacentDay(deltaDays: number) {
+    if (!selectedDayKey) return;
+    const nextKey = addDaysKey(selectedDayKey, deltaDays);
+    setSelectedDayKey(nextKey);
+    setMonthCursor(startOfMonth(parseDateKey(nextKey)));
+    onDaySelect?.(nextKey);
+  }
+
   return (
     <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex shrink-0 items-center gap-2">
@@ -444,13 +455,35 @@ export default function FreeSlotViewer({ refreshSignal, initialShift, focusReque
 
       <div className="mt-4 min-h-0 flex-1">
         {selectedDayKey ? (
-          <CalendarGrid
-            days={[parseDateKey(selectedDayKey)]}
-            dayStartMinutes={dayStartMinutes}
-            dayEndMinutes={dayEndMinutes}
-            engagements={blockingEngagements}
-            freeSlots={freeSlots}
-          />
+          <div className="flex h-full flex-col gap-3">
+            <div className="min-h-0 flex-1">
+              <CalendarGrid
+                days={[parseDateKey(selectedDayKey)]}
+                dayStartMinutes={dayStartMinutes}
+                dayEndMinutes={dayEndMinutes}
+                engagements={blockingEngagements}
+                freeSlots={freeSlots}
+              />
+            </div>
+            <div className="flex shrink-0 items-center justify-between">
+              <button
+                type="button"
+                onClick={() => goToAdjacentDay(-1)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous day
+              </button>
+              <button
+                type="button"
+                onClick={() => goToAdjacentDay(1)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Next day
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         ) : (
           <MonthGrid
             monthCursor={monthCursor}
