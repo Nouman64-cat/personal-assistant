@@ -94,6 +94,60 @@ export function hourStringToMinutes(hourString: string): number {
   return Number(hourStr ?? 0) * 60 + Number(minuteStr ?? 0);
 }
 
+/** A short set of commonly-needed zones for "copy my availability" style
+ * features — picking from a handful of named options is far friendlier than
+ * a free-text IANA zone input, and covers the vast majority of cross-zone
+ * coordination (US business zones plus UTC/London). */
+export const COMMON_TIMEZONES: { label: string; value: string }[] = [
+  { label: "Eastern (New York)", value: "America/New_York" },
+  { label: "Central (Chicago)", value: "America/Chicago" },
+  { label: "Mountain (Denver)", value: "America/Denver" },
+  { label: "Pacific (Los Angeles)", value: "America/Los_Angeles" },
+  { label: "London", value: "Europe/London" },
+  { label: "UTC", value: "UTC" },
+];
+
+/** Format an instant as a wall-clock time in an arbitrary IANA zone — used
+ * to render a slot in whatever zone the *recipient* of a shared availability
+ * message is in, independent of the viewer's own browser timezone. */
+export function formatTimeInZone(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+}
+
+/** Same as `formatDayLabel`, but for an arbitrary IANA zone rather than the
+ * browser's own — the calendar date can differ from the viewer's local date
+ * once converted (e.g. late-night PKT landing on the previous US morning). */
+export function formatDayLabelInZone(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+/** The short zone abbreviation (e.g. "EDT", "GMT+5") for an instant in a
+ * given IANA zone — DST-aware, unlike a fixed offset baked in ahead of time. */
+export function timeZoneAbbreviation(date: Date, timeZone: string): string {
+  const part = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
+    .formatToParts(date)
+    .find((entry) => entry.type === "timeZoneName");
+  return part?.value ?? timeZone;
+}
+
+/** yyyy-MM-dd calendar-date key for an instant in an arbitrary IANA zone —
+ * used to group slots by the *recipient's* calendar day, not the viewer's. */
+export function dateKeyInZone(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    date,
+  );
+}
+
 /**
  * Convert a local wall-clock time (e.g. "09:00") on a given local calendar
  * date into its UTC equivalent. The backend has no timezone concept — it

@@ -10,8 +10,14 @@ import type {
   ShiftSettingsInput,
 } from "@/lib/types";
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// Left unset (the default), requests go to a same-origin relative path and
+// next.config.ts's rewrite forwards them server-side to the backend — this
+// keeps things working no matter what URL the browser used to reach the
+// frontend (localhost, a LAN IP, an ngrok tunnel, ...), with no CORS setup
+// needed. Only set NEXT_PUBLIC_API_BASE_URL when the backend is genuinely on
+// a different origin the browser must call directly (e.g. separately hosted
+// in production).
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 const API_V1_URL = `${API_BASE_URL}/api/v1`;
 
@@ -55,13 +61,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
         ...init?.headers,
       },
     });
   } catch {
     throw new ApiError(
-      "Could not reach the API server. Is the backend running at " +
-        `${API_BASE_URL}?`,
+      API_BASE_URL
+        ? `Could not reach the API server. Is the backend running at ${API_BASE_URL}?`
+        : "Could not reach the API server. Is the backend running at http://localhost:8000?",
       0,
     );
   }

@@ -33,6 +33,10 @@ class ShiftSettings(SQLModel, table=True):
     day_start_hour: time = Field(default=time(9, 0))
     day_end_hour: time = Field(default=time(18, 0))
     timezone: str = Field(default="UTC")
+    # Minimum gap kept on both sides of every blocking engagement when
+    # suggesting free slots (create_engagement/check_availability's own
+    # conflict check is unaffected — this only shapes what gets *offered*).
+    buffer_minutes: int = Field(default=10)
 
 
 class ChatRole(str, Enum):

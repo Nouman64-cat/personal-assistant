@@ -161,6 +161,7 @@ def resolve_free_slots_for_range(
     day_start_hour: Optional[time] = None,
     day_end_hour: Optional[time] = None,
     min_duration_minutes: int = 30,
+    buffer_minutes: Optional[int] = None,
 ) -> FreeSlotsResult:
     """Compute free slots for a date range, falling back to the saved shift
     for any window bound left unspecified. Shared by the /free-slots REST
@@ -174,12 +175,14 @@ def resolve_free_slots_for_range(
     if date_from > date_to:
         raise ValueError("date_from must not be after date_to")
 
-    if day_start_hour is None or day_end_hour is None:
+    if day_start_hour is None or day_end_hour is None or buffer_minutes is None:
         shift = get_or_create_shift_settings(session)
         if day_start_hour is None:
             day_start_hour = local_time_to_utc(date_from, shift.day_start_hour, shift.timezone)
         if day_end_hour is None:
             day_end_hour = local_time_to_utc(date_from, shift.day_end_hour, shift.timezone)
+        if buffer_minutes is None:
+            buffer_minutes = shift.buffer_minutes
 
     if day_start_hour == day_end_hour:
         raise ValueError("day_start_hour and day_end_hour must not be equal")
@@ -212,7 +215,7 @@ def resolve_free_slots_for_range(
         existing_engagements=blocking_engagements,
         working_hours_start=day_start_hour,
         working_hours_end=day_end_hour,
-        buffer_minutes=0,
+        buffer_minutes=buffer_minutes,
         min_duration_minutes=min_duration_minutes,
     )
     return FreeSlotsResult(slots=slots, blocking_engagements=list(blocking_engagements))

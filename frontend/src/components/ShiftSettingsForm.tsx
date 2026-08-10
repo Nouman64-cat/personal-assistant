@@ -33,6 +33,7 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
   const [dayStartHour, setDayStartHour] = useState(toInputTime(shift.day_start_hour));
   const [dayEndHour, setDayEndHour] = useState(toInputTime(shift.day_end_hour));
   const [timezone, setTimezone] = useState(shift.timezone);
+  const [bufferMinutes, setBufferMinutes] = useState(shift.buffer_minutes);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
@@ -58,6 +59,7 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
         day_start_hour: dayStartHour,
         day_end_hour: dayEndHour,
         timezone,
+        buffer_minutes: bufferMinutes,
       });
       onSaved(updated);
       setJustSaved(true);
@@ -71,7 +73,7 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
   const detected = detectBrowserTimezone();
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex items-center gap-2">
         <Clock className="h-5 w-5 text-sky-600 dark:text-sky-400" />
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">My Shift</h2>
@@ -81,7 +83,7 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
       </p>
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Field label="Starts">
             <input
               type="time"
@@ -113,6 +115,20 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
                 setTimezone(event.target.value);
               }}
               placeholder="e.g. Asia/Karachi"
+              className={inputClasses}
+            />
+          </Field>
+          <Field label="Buffer between engagements (min)">
+            <input
+              type="number"
+              min={0}
+              max={120}
+              step={5}
+              value={bufferMinutes}
+              onChange={(event) => {
+                markDirty();
+                setBufferMinutes(Math.max(0, Math.min(120, Number(event.target.value) || 0)));
+              }}
               className={inputClasses}
             />
           </Field>
@@ -148,6 +164,10 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
             </p>
           )
         )}
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+          Suggested free slots keep at least {bufferMinutes} minute{bufferMinutes === 1 ? "" : "s"} of breathing
+          room before and after every engagement — so back-to-back interviews never get offered with zero gap.
+        </p>
       </form>
 
       {saveError && (

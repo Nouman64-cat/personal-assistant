@@ -1,7 +1,7 @@
 from datetime import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ShiftSettingsBase(BaseModel):
@@ -10,6 +10,10 @@ class ShiftSettingsBase(BaseModel):
     # treated as overnight, ending the next day.
     day_end_hour: time
     timezone: str
+    # Minimum gap kept on both sides of every blocking engagement when
+    # suggesting free slots — keeps back-to-back interviews/meetings from
+    # being offered with zero breathing room in between.
+    buffer_minutes: int = Field(default=10, ge=0, le=120)
 
     @field_validator("timezone")
     @classmethod

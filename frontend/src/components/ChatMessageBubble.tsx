@@ -65,7 +65,9 @@ export default function ChatMessageBubble({
         <div
           className={cn(
             "rounded-2xl px-4 py-2.5 text-sm",
-            isUser ? "whitespace-pre-wrap bg-violet-600 text-white" : "border border-zinc-200 bg-white text-zinc-800",
+            isUser
+              ? "whitespace-pre-wrap bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-sm shadow-violet-500/20"
+              : "border border-zinc-200 bg-white text-zinc-800 shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100",
           )}
         >
           {isUser ? (

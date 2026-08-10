@@ -22,6 +22,7 @@ def update_shift_settings(
     shift.day_start_hour = payload.day_start_hour
     shift.day_end_hour = payload.day_end_hour
     shift.timezone = payload.timezone
+    shift.buffer_minutes = payload.buffer_minutes
 
     session.add(shift)
     session.commit()

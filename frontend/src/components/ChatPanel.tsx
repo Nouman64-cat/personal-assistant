@@ -12,6 +12,13 @@ import ChatMessageBubble from "./ChatMessageBubble";
 
 const SESSION_STORAGE_KEY = "chat_session_id";
 
+const SUGGESTED_PROMPTS = [
+  "Schedule a call with Sam tomorrow at 3pm",
+  "What's free this week?",
+  "Am I available Friday at 2pm EST?",
+  "Move my 4pm to 5pm",
+];
+
 const WEEKDAY_AUTO_SELECT_MS = 4500;
 /** Index 0 = Sunday, matching `Date.getDay()`. */
 const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -243,60 +250,88 @@ export default function ChatPanel() {
   }
 
   return (
-    <section className="flex h-[calc(100vh-4rem)] flex-col rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-violet-600 dark:text-violet-400" />
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Chat</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Tell it what to schedule, move, or cancel — it remembers this conversation.
-            </p>
+    <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="relative shrink-0 overflow-hidden border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent dark:from-violet-500/10" />
+        <div className="relative flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-sm shadow-violet-500/30">
+              <Sparkles className="h-4.5 w-4.5" />
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Chat</h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Tell it what to schedule, move, or cancel — it remembers this conversation.
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={messages.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+            New Chat
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={handleNewChat}
-          disabled={messages.length === 0}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          <MessageSquarePlus className="h-3.5 w-3.5" />
-          New Chat
-        </button>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      <div className="flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-violet-50/40 to-transparent px-5 py-4 dark:from-violet-500/5">
         {isHydrating ? (
           <div className="flex items-center justify-center py-8 text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            <Sparkles className="h-6 w-6 text-violet-400" />
-            <p>
-              Try &quot;Schedule a call with Sam tomorrow at 3pm&quot; or &quot;What&apos;s free
-              this week?&quot;
-            </p>
+          <div className="flex h-full flex-col items-center justify-center gap-4 py-8 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-lg shadow-violet-500/25">
+              <Sparkles className="h-7 w-7 text-white" />
+            </span>
+            <div>
+              <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                What do you want to schedule?
+              </h3>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Ask naturally — timezone math and conflict-checking are handled for you.
+              </p>
+            </div>
+            <div className="flex max-w-sm flex-wrap justify-center gap-2">
+              {SUGGESTED_PROMPTS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => {
+                    setInput(suggestion);
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                  }}
+                  className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-violet-500/40 dark:hover:bg-violet-500/10 dark:hover:text-violet-300"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((message, index) => (
-            <ChatMessageBubble
-              key={index}
-              role={message.role}
-              content={message.content}
-              actions={message.actions}
-              freeSlots={message.freeSlots}
-              busyEngagements={message.busyEngagements}
-              conflict={message.conflict}
-              shift={shift}
-            />
+            <div key={index} className="animate-message-in">
+              <ChatMessageBubble
+                role={message.role}
+                content={message.content}
+                actions={message.actions}
+                freeSlots={message.freeSlots}
+                busyEngagements={message.busyEngagements}
+                conflict={message.conflict}
+                shift={shift}
+              />
+            </div>
           ))
         )}
         {isSending && (
-          <div className="flex justify-start">
-            <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Thinking…
+          <div className="flex animate-message-in justify-start">
+            <div className="flex items-center gap-1.5 rounded-2xl border border-zinc-200 bg-white px-4 py-3.5 dark:border-zinc-800 dark:bg-zinc-900">
+              <span className="h-1.5 w-1.5 animate-bounce-dot rounded-full bg-violet-400" style={{ animationDelay: "0ms" }} />
+              <span className="h-1.5 w-1.5 animate-bounce-dot rounded-full bg-violet-400" style={{ animationDelay: "160ms" }} />
+              <span className="h-1.5 w-1.5 animate-bounce-dot rounded-full bg-violet-400" style={{ animationDelay: "320ms" }} />
             </div>
           </div>
         )}
@@ -385,7 +420,7 @@ export default function ChatPanel() {
           type="button"
           onClick={handleSend}
           disabled={isSending || input.trim().length === 0}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-sm shadow-violet-500/30 transition hover:scale-105 hover:shadow-md hover:shadow-violet-500/40 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
           aria-label="Send message"
         >
           {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

@@ -337,7 +337,7 @@ export default function ShiftEngagementList({ shift, refreshSignal, onChanged }:
   }
 
   return (
-    <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex shrink-0 items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Shifts</h2>

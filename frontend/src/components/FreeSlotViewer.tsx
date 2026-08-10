@@ -383,7 +383,7 @@ export default function FreeSlotViewer({
   }
 
   return (
-    <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex shrink-0 items-center gap-2">
         <CalendarClock className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
@@ -701,7 +701,7 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
               )}
 
               {inCurrentMonth && summary && (summary.freeMinutes > 0 || summary.busyMinutes > 0) && (
-                <span className="flex w-full min-w-0 items-center gap-1 truncate text-[9px] font-semibold leading-none tabular-nums">
+                <span className="hidden w-full min-w-0 items-center gap-1 truncate text-[9px] font-semibold leading-none tabular-nums sm:flex">
                   <span className="text-emerald-600 dark:text-emerald-400">
                     {formatCompactHours(summary.freeMinutes)}
                   </span>
@@ -711,7 +711,7 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
               )}
 
               {inCurrentMonth && summary && (summary.longestFree || summary.longestBusy) && (
-                <span className="flex w-full min-w-0 items-center gap-1 truncate text-[9px] leading-none tabular-nums">
+                <span className="hidden w-full min-w-0 items-center gap-1 truncate text-[9px] leading-none tabular-nums sm:flex">
                   {summary.longestFree && (
                     <span className="shrink-0 text-emerald-600/70 dark:text-emerald-400/70">
                       {formatCompactRange(summary.longestFree)}

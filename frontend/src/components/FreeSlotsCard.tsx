@@ -1,8 +1,21 @@
+"use client";
+
+import { useState } from "react";
 import { addDays, addMinutes, differenceInMinutes, format, isToday, isTomorrow, startOfDay } from "date-fns";
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck, Check, Copy } from "lucide-react";
 
 import type { BusyEngagementInfo, FreeSlotItem, ShiftSettings } from "@/lib/types";
-import { CATEGORY_LABELS, cn, formatDuration, hourStringToMinutes } from "@/lib/utils";
+import {
+  CATEGORY_LABELS,
+  cn,
+  COMMON_TIMEZONES,
+  dateKeyInZone,
+  formatDayLabelInZone,
+  formatDuration,
+  formatTimeInZone,
+  hourStringToMinutes,
+  timeZoneAbbreviation,
+} from "@/lib/utils";
 
 const SEGMENT_MINUTES = 30;
 
@@ -77,8 +90,46 @@ function overlapsRange(interval: Interval, range?: { start: string; end: string 
   return interval.start < rangeEnd && interval.end > rangeStart;
 }
 
+/** Plain-text availability summary, grouped and worded in `timeZone` — ready
+ * to paste into an email/message reply to whoever asked when you're free. */
+function buildAvailabilityText(slots: FreeSlotItem[], timeZone: string): string {
+  const byDay = new Map<string, { label: string; ranges: string[] }>();
+  for (const slot of slots) {
+    const start = new Date(slot.start_time);
+    const end = new Date(slot.end_time);
+    const key = dateKeyInZone(start, timeZone);
+    const entry = byDay.get(key) ?? { label: formatDayLabelInZone(start, timeZone), ranges: [] };
+    entry.ranges.push(`${formatTimeInZone(start, timeZone)}–${formatTimeInZone(end, timeZone)}`);
+    byDay.set(key, entry);
+  }
+  const abbreviation = timeZoneAbbreviation(new Date(slots[0].start_time), timeZone);
+  const lines = [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, { label, ranges }]) => `• ${label}: ${ranges.join(", ")}`);
+  return `Here's my availability (${abbreviation}):\n${lines.join("\n")}`;
+}
+
 export default function FreeSlotsCard({ slots, busyEngagements, shift, highlightRange }: FreeSlotsCardProps) {
+  const [targetTimeZone, setTargetTimeZone] = useState(shift.timezone);
+  const [copied, setCopied] = useState(false);
+
   if (slots.length === 0) return null;
+
+  const timeZoneOptions = [
+    { label: `My timezone (${shift.timezone})`, value: shift.timezone },
+    ...COMMON_TIMEZONES.filter((zone) => zone.value !== shift.timezone),
+  ];
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(buildAvailabilityText(slots, targetTimeZone));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can fail (permissions, insecure context) — silently
+      // no-op rather than surfacing an error for a low-stakes convenience action.
+    }
+  }
 
   const dayStartMinutes = hourStringToMinutes(shift.day_start_hour.slice(0, 5));
   const dayEndMinutes = hourStringToMinutes(shift.day_end_hour.slice(0, 5));
@@ -99,7 +150,7 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift, highlight
 
   return (
     <div className="w-full space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
           <CalendarCheck className="h-3.5 w-3.5" />
           Available slots
@@ -114,6 +165,34 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift, highlight
             Busy
           </span>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-emerald-200/70 pt-2.5">
+        <select
+          value={targetTimeZone}
+          onChange={(event) => setTargetTimeZone(event.target.value)}
+          aria-label="Timezone for copied availability"
+          className="rounded-lg border border-emerald-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+        >
+          {timeZoneOptions.map((zone) => (
+            <option key={zone.value} value={zone.value}>
+              {zone.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition",
+            copied
+              ? "bg-emerald-600 text-white"
+              : "bg-white text-emerald-700 ring-1 ring-inset ring-emerald-300 hover:bg-emerald-100",
+          )}
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          {copied ? "Copied!" : "Copy as reply"}
+        </button>
       </div>
 
       <div className="space-y-4">

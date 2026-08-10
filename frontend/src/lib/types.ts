@@ -122,10 +122,13 @@ export interface ShiftSettings {
   day_start_hour: string;
   day_end_hour: string;
   timezone: string;
+  /** Minimum gap kept around every engagement when suggesting free slots. */
+  buffer_minutes: number;
 }
 
 export interface ShiftSettingsInput {
   day_start_hour: string;
   day_end_hour: string;
   timezone: string;
+  buffer_minutes: number;
 }
