@@ -4,7 +4,7 @@ import ShiftEngagementList from "@/components/ShiftEngagementList";
 import { useAppState } from "@/lib/appState";
 
 export default function EngagementsPage() {
-  const { shift, shiftLoadError, refreshSignal } = useAppState();
+  const { shift, shiftLoadError, refreshSignal, triggerRefresh } = useAppState();
 
   return (
     <div className="flex h-full w-full flex-col px-6 py-8">
@@ -17,7 +17,7 @@ export default function EngagementsPage() {
 
       <div className="min-h-0 flex-1">
         {shift ? (
-          <ShiftEngagementList shift={shift} refreshSignal={refreshSignal} />
+          <ShiftEngagementList shift={shift} refreshSignal={refreshSignal} onChanged={triggerRefresh} />
         ) : (
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
             {shiftLoadError ? "Couldn't load shift settings." : "Loading your shift settings…"}

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarX2, ChevronDown, Loader2, Moon, Sun } from "lucide-react";
+import { AlertTriangle, CalendarX2, ChevronDown, Loader2, Moon, Plus, Sun } from "lucide-react";
 
+import EngagementFormModal from "@/components/EngagementFormModal";
 import { ApiError, listEngagements } from "@/lib/api";
 import type { Engagement, ShiftSettings } from "@/lib/types";
 import {
@@ -24,7 +25,11 @@ import {
 interface ShiftEngagementListProps {
   shift: ShiftSettings;
   refreshSignal?: number;
+  /** Called after an engagement is added, edited, or deleted, so siblings (e.g. the calendar view) can refetch. */
+  onChanged?: () => void;
 }
+
+type ModalState = { mode: "create"; start: Date; end: Date } | { mode: "edit"; engagement: Engagement };
 
 interface Interval {
   start: Date;
@@ -138,12 +143,13 @@ function formatShiftLabel(group: ShiftGroup): string {
   return `${formatDayLabel(group.shiftStart)} → ${formatDayLabel(group.shiftEnd)} · ${timeRange}`;
 }
 
-export default function ShiftEngagementList({ shift, refreshSignal }: ShiftEngagementListProps) {
+export default function ShiftEngagementList({ shift, refreshSignal, onChanged }: ShiftEngagementListProps) {
   const [engagements, setEngagements] = useState<Engagement[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  const [modalState, setModalState] = useState<ModalState | null>(null);
 
   // Keeps "on shift now" / current-shift bucketing fresh without a refetch.
   useEffect(() => {
@@ -151,24 +157,28 @@ export default function ShiftEngagementList({ shift, refreshSignal }: ShiftEngag
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Plain (non-memoized) function, recreated each render — called on mount,
+  // whenever the parent bumps `refreshSignal`, and again directly after this
+  // component's own create/edit/delete so the list reflects the change
+  // immediately rather than waiting on the parent's refresh to round-trip.
+  async function loadEngagements() {
     setIsLoading(true);
     setError(null);
-    listEngagements()
-      .then((data) => {
-        if (!cancelled) setEngagements(data);
-      })
-      .catch((caught) => {
-        if (!cancelled) setError(caught instanceof ApiError ? caught.message : "Failed to load engagements.");
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const data = await listEngagements();
+      setEngagements(data);
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Failed to load engagements.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadEngagements();
+    // loadEngagements is intentionally omitted — see comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSignal]);
 
   const dayStartMinutes = hourStringToMinutes(shift.day_start_hour.slice(0, 5));
@@ -241,6 +251,21 @@ export default function ShiftEngagementList({ shift, refreshSignal }: ShiftEngag
           <span className="ml-auto shrink-0 text-xs font-medium text-zinc-400 dark:text-zinc-500">
             {formatDuration(busyMinutes)} booked ({utilizationPct}%)
           </span>
+          <button
+            type="button"
+            onClick={() =>
+              setModalState({
+                mode: "create",
+                start: group.shiftStart,
+                end: new Date(Math.min(group.shiftStart.getTime() + 60 * 60_000, group.shiftEnd.getTime())),
+              })
+            }
+            title="Add an engagement to this shift"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-violet-600 transition hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-500/10"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add
+          </button>
         </div>
 
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
@@ -272,9 +297,12 @@ export default function ShiftEngagementList({ shift, refreshSignal }: ShiftEngag
               // row sorted after "9:00 PM" ones doesn't look out of order.
               const spillsToNextDay = toDateKey(start) !== toDateKey(group.shiftStart);
               return (
-                <div
+                <button
                   key={engagement.id}
-                  className="flex items-center gap-2 rounded-lg border border-zinc-100 px-2 py-1.5 dark:border-zinc-800/70"
+                  type="button"
+                  onClick={() => setModalState({ mode: "edit", engagement })}
+                  title="Click to edit"
+                  className="flex w-full items-center gap-2 rounded-lg border border-zinc-100 px-2 py-1.5 text-left transition hover:border-violet-200 hover:bg-violet-50/50 dark:border-zinc-800/70 dark:hover:border-violet-500/30 dark:hover:bg-violet-500/5"
                 >
                   <span
                     className={cn("h-1.5 w-1.5 shrink-0 rounded-full", CATEGORY_BLOCK_CLASSES[engagement.category])}
@@ -299,7 +327,7 @@ export default function ShiftEngagementList({ shift, refreshSignal }: ShiftEngag
                     {spillsToNextDay && `${formatDayLabel(start)} · `}
                     {formatTime(engagement.start_time)}–{formatTime(engagement.end_time)}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -352,6 +380,25 @@ export default function ShiftEngagementList({ shift, refreshSignal }: ShiftEngag
           </>
         )}
       </div>
+
+      {modalState && (
+        <EngagementFormModal
+          mode={modalState.mode}
+          initialStart={modalState.mode === "create" ? modalState.start : parseNaiveIso(modalState.engagement.start_time)}
+          initialEnd={modalState.mode === "create" ? modalState.end : parseNaiveIso(modalState.engagement.end_time)}
+          initialTitle={modalState.mode === "edit" ? modalState.engagement.title : undefined}
+          initialDescription={modalState.mode === "edit" ? modalState.engagement.description : undefined}
+          initialCategory={modalState.mode === "edit" ? modalState.engagement.category : undefined}
+          initialIsBlocking={modalState.mode === "edit" ? modalState.engagement.is_blocking : undefined}
+          engagementId={modalState.mode === "edit" ? modalState.engagement.id : undefined}
+          onClose={() => setModalState(null)}
+          onSaved={() => {
+            setModalState(null);
+            loadEngagements();
+            onChanged?.();
+          }}
+        />
+      )}
     </section>
   );
 }
