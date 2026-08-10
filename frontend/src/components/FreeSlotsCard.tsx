@@ -19,6 +19,10 @@ interface FreeSlotsCardProps {
    * alone doesn't say where the shift starts/ends on a day that's fully busy
    * at one edge (or fully booked, though that day just won't appear here). */
   shift: ShiftSettings;
+  /** When set (a conflict or check_availability turn), segment(s) overlapping
+   * this exact time range get a ring highlight — green if it landed on a free
+   * stretch (confirming availability), amber/red if busy (the conflict). */
+  highlightRange?: { start: string; end: string };
 }
 
 interface Interval {
@@ -66,7 +70,14 @@ function findBusyEngagement(interval: Interval, busyEngagements: BusyEngagementI
   });
 }
 
-export default function FreeSlotsCard({ slots, busyEngagements, shift }: FreeSlotsCardProps) {
+function overlapsRange(interval: Interval, range?: { start: string; end: string }): boolean {
+  if (!range) return false;
+  const rangeStart = new Date(range.start);
+  const rangeEnd = new Date(range.end);
+  return interval.start < rangeEnd && interval.end > rangeStart;
+}
+
+export default function FreeSlotsCard({ slots, busyEngagements, shift, highlightRange }: FreeSlotsCardProps) {
   if (slots.length === 0) return null;
 
   const dayStartMinutes = hourStringToMinutes(shift.day_start_hour.slice(0, 5));
@@ -148,12 +159,14 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift }: FreeSlo
                 <div className="flex h-6 gap-px">
                   {segments.map(({ isFree, interval }, index) => {
                     const engagement = isFree ? undefined : findBusyEngagement(interval, busyEngagements);
+                    const isHighlighted = overlapsRange(interval, highlightRange);
                     return (
                       <div key={index} className="group relative flex-1">
                         <div
                           className={cn(
                             "h-6",
-                            isFree ? "bg-emerald-500" : "bg-red-300",
+                            isFree ? "bg-emerald-500" : isHighlighted ? "bg-red-500" : "bg-red-300",
+                            isHighlighted && (isFree ? "ring-2 ring-emerald-700 ring-offset-1" : "ring-2 ring-amber-500 ring-offset-1"),
                             index === 0 && "rounded-l-md",
                             index === segments.length - 1 && "rounded-r-md",
                           )}
@@ -162,6 +175,7 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift }: FreeSlo
                           <div className="max-w-[180px] whitespace-normal rounded-lg bg-zinc-900 px-2.5 py-1.5 text-center shadow-lg">
                             <div className="text-[11px] font-semibold text-white">
                               {isFree ? "Free" : (engagement?.title ?? "Busy")}
+                              {isHighlighted && (isFree ? " ✓" : " ⚠")}
                             </div>
                             {engagement && (
                               <div className="text-[10px] text-zinc-400">{CATEGORY_LABELS[engagement.category]}</div>

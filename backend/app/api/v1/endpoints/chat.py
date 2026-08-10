@@ -34,6 +34,7 @@ def send_message(
         actions=result.actions,
         free_slots=result.free_slots,
         busy_engagements=result.busy_engagements,
+        conflict=result.conflict,
     )
 
 

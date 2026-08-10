@@ -37,16 +37,18 @@ def merge_intervals(intervals: Sequence[Interval]) -> List[Interval]:
     return merged
 
 
-def check_conflict(
+def find_conflicting_engagement(
     new_start: datetime,
     new_end: datetime,
     existing_engagements: Iterable[Engagement],
     exclude_id: Optional[UUID] = None,
-) -> bool:
-    """Return True if [new_start, new_end) overlaps any blocking engagement.
+) -> Optional[Engagement]:
+    """Return the first blocking engagement that overlaps [new_start, new_end), if any.
 
     Adjacent intervals (one ending exactly when the other starts) do not
-    count as conflicts.
+    count as conflicts. Returning the engagement itself (not just a bool)
+    lets callers report specifically *which* existing commitment is in the
+    way, instead of a bare "conflict" message.
     """
     if new_start >= new_end:
         raise ValueError("new_start must be before new_end")
@@ -57,9 +59,19 @@ def check_conflict(
         if exclude_id is not None and engagement.id == exclude_id:
             continue
         if engagement.start_time < new_end and engagement.end_time > new_start:
-            return True
+            return engagement
 
-    return False
+    return None
+
+
+def check_conflict(
+    new_start: datetime,
+    new_end: datetime,
+    existing_engagements: Iterable[Engagement],
+    exclude_id: Optional[UUID] = None,
+) -> bool:
+    """Return True if [new_start, new_end) overlaps any blocking engagement."""
+    return find_conflicting_engagement(new_start, new_end, existing_engagements, exclude_id) is not None
 
 
 def get_free_slots(

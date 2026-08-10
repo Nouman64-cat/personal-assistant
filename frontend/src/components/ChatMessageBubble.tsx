@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2 } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { BusyEngagementInfo, EngagementAction, FreeSlotItem, ShiftSettings } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import type { BusyEngagementInfo, ConflictInfo, EngagementAction, FreeSlotItem, ShiftSettings } from "@/lib/types";
+import { cn, formatClockTime } from "@/lib/utils";
 
 import EngagementActionCard from "./EngagementActionCard";
 import FreeSlotsCard from "./FreeSlotsCard";
@@ -15,6 +15,11 @@ interface ChatMessageBubbleProps {
   actions?: EngagementAction[];
   freeSlots?: FreeSlotItem[];
   busyEngagements?: BusyEngagementInfo[];
+  /** Set whenever this turn checked a specific time window — a create/update
+   * that hit a conflict, or a direct check_availability question. Renders a
+   * banner (amber for a conflict, green for confirmed-available) and
+   * highlights the checked window in the free-slots widget below. */
+  conflict?: ConflictInfo | null;
   /** Needed to bound the free-slots timeline bar to the shift window; the
    * widget just doesn't render until the shift has loaded. */
   shift?: ShiftSettings | null;
@@ -49,6 +54,7 @@ export default function ChatMessageBubble({
   actions = [],
   freeSlots = [],
   busyEngagements = [],
+  conflict = null,
   shift = null,
 }: ChatMessageBubbleProps) {
   const isUser = role === "user";
@@ -70,8 +76,38 @@ export default function ChatMessageBubble({
             </ReactMarkdown>
           )}
         </div>
+        {conflict &&
+          (conflict.available ? (
+            <div className="flex w-full items-start gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Free from {formatClockTime(new Date(conflict.attempted_start_time))} to{" "}
+                {formatClockTime(new Date(conflict.attempted_end_time))} — highlighted below.
+              </span>
+            </div>
+          ) : (
+            <div className="flex w-full items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                <strong>&quot;{conflict.attempted_title}&quot;</strong> (
+                {formatClockTime(new Date(conflict.attempted_start_time))}–
+                {formatClockTime(new Date(conflict.attempted_end_time))}) conflicts with{" "}
+                <strong>&quot;{conflict.conflicting_with?.title}&quot;</strong> (
+                {conflict.conflicting_with && formatClockTime(new Date(conflict.conflicting_with.start_time))}–
+                {conflict.conflicting_with && formatClockTime(new Date(conflict.conflicting_with.end_time))}
+                ), highlighted below.
+              </span>
+            </div>
+          ))}
         {freeSlots.length > 0 && shift && (
-          <FreeSlotsCard slots={freeSlots} busyEngagements={busyEngagements} shift={shift} />
+          <FreeSlotsCard
+            slots={freeSlots}
+            busyEngagements={busyEngagements}
+            shift={shift}
+            highlightRange={
+              conflict ? { start: conflict.attempted_start_time, end: conflict.attempted_end_time } : undefined
+            }
+          />
         )}
         {actions.length > 0 && (
           <div className="w-full space-y-1.5">

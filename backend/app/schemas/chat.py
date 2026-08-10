@@ -34,6 +34,23 @@ class BusyEngagementInfo(BaseModel):
     end_time: datetime
 
 
+class ConflictInfo(BaseModel):
+    """The result of checking a specific time window against the calendar —
+    either because create_engagement/update_engagement hit a conflict, or
+    because check_availability answered a direct yes/no question. `available`
+    tells the UI which widget to render (a green confirmation vs. an amber
+    conflict callout with the blocking engagement highlighted); `conflicting_with`
+    is only set when `available` is False. Only attached to the live turn's
+    response, not persisted/replayed with chat history — the plain busy-slots
+    widget and reply text still explain what happened on reload."""
+
+    available: bool
+    attempted_title: str
+    attempted_start_time: datetime
+    attempted_end_time: datetime
+    conflicting_with: Optional[BusyEngagementInfo] = None
+
+
 class ChatMessageRequest(BaseModel):
     session_id: Optional[UUID] = Field(
         default=None, description="Omit on the first message of a new conversation."
@@ -58,6 +75,7 @@ class ChatMessageResponse(BaseModel):
     # UI can describe *why* a stretch is busy (e.g. a hover tooltip) instead
     # of just showing "Busy".
     busy_engagements: List[BusyEngagementInfo] = Field(default_factory=list)
+    conflict: Optional[ConflictInfo] = None
 
 
 class ChatHistoryMessage(BaseModel):

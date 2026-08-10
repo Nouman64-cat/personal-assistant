@@ -6,7 +6,14 @@ from sqlmodel import Session, select
 
 from app.db.models import Engagement
 from app.schemas.engagement import EngagementCreate, EngagementUpdate
-from app.services.schedule_service import check_conflict
+from app.services.schedule_service import find_conflicting_engagement
+
+
+def _format_conflict_message(conflict: Engagement) -> str:
+    return (
+        f"Conflicts with existing engagement '{conflict.title}' "
+        f"({conflict.start_time.isoformat()} to {conflict.end_time.isoformat()} UTC)"
+    )
 
 
 class EngagementNotFoundError(Exception):
@@ -14,13 +21,41 @@ class EngagementNotFoundError(Exception):
 
 
 class EngagementConflictError(Exception):
-    """Raised when a create/update would overlap an existing blocking engagement."""
+    """Raised when a create/update would overlap an existing blocking engagement.
+
+    Carries the conflicting engagement plus what was actually being attempted
+    (title/start/end, post-merge for an update) so callers — e.g. the chat
+    tool executor — can report specifics and surface that day's free slots
+    without re-deriving the merge logic themselves.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        conflicting_engagement: Optional[Engagement] = None,
+        attempted_title: Optional[str] = None,
+        attempted_start: Optional[datetime] = None,
+        attempted_end: Optional[datetime] = None,
+    ) -> None:
+        super().__init__(message)
+        self.conflicting_engagement = conflicting_engagement
+        self.attempted_title = attempted_title
+        self.attempted_start = attempted_start
+        self.attempted_end = attempted_end
 
 
 def create_engagement(session: Session, payload: EngagementCreate) -> Engagement:
     existing = session.exec(select(Engagement)).all()
-    if payload.is_blocking and check_conflict(payload.start_time, payload.end_time, existing):
-        raise EngagementConflictError("Engagement conflicts with an existing blocking engagement")
+    if payload.is_blocking:
+        conflict = find_conflicting_engagement(payload.start_time, payload.end_time, existing)
+        if conflict is not None:
+            raise EngagementConflictError(
+                _format_conflict_message(conflict),
+                conflicting_engagement=conflict,
+                attempted_title=payload.title,
+                attempted_start=payload.start_time,
+                attempted_end=payload.end_time,
+            )
 
     engagement = Engagement(**payload.model_dump())
     session.add(engagement)
@@ -42,6 +77,7 @@ def update_engagement(session: Session, engagement_id: UUID, payload: Engagement
     updates = payload.model_dump(exclude_unset=True)
     new_start = updates.get("start_time", engagement.start_time)
     new_end = updates.get("end_time", engagement.end_time)
+    new_title = updates.get("title", engagement.title)
     new_is_blocking = updates.get("is_blocking", engagement.is_blocking)
 
     if new_start >= new_end:
@@ -49,8 +85,15 @@ def update_engagement(session: Session, engagement_id: UUID, payload: Engagement
 
     if new_is_blocking:
         others = [e for e in session.exec(select(Engagement)).all() if e.id != engagement_id]
-        if check_conflict(new_start, new_end, others):
-            raise EngagementConflictError("Engagement conflicts with an existing blocking engagement")
+        conflict = find_conflicting_engagement(new_start, new_end, others)
+        if conflict is not None:
+            raise EngagementConflictError(
+                _format_conflict_message(conflict),
+                conflicting_engagement=conflict,
+                attempted_title=new_title,
+                attempted_start=new_start,
+                attempted_end=new_end,
+            )
 
     for field, value in updates.items():
         setattr(engagement, field, value)

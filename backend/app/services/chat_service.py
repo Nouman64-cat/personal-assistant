@@ -13,13 +13,14 @@ from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from app.core.config import settings
-from app.db.models import ChatMessage, ChatRole, ChatSession, EngagementCategory
-from app.schemas.chat import BusyEngagementInfo, EngagementAction, EngagementActionType
+from app.core.time_utils import to_naive_utc
+from app.db.models import ChatMessage, ChatRole, ChatSession, Engagement, EngagementCategory
+from app.schemas.chat import BusyEngagementInfo, ConflictInfo, EngagementAction, EngagementActionType
 from app.schemas.engagement import EngagementCreate, EngagementRead, EngagementUpdate
 from app.schemas.schedule import FreeSlotItem
 from app.services import engagement_service
 from app.services.engagement_service import EngagementConflictError, EngagementNotFoundError
-from app.services.schedule_service import resolve_free_slots_for_range
+from app.services.schedule_service import find_conflicting_engagement, resolve_free_slots_for_range
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class ChatTurnResult:
     actions: List[EngagementAction] = field(default_factory=list)
     free_slots: List[FreeSlotItem] = field(default_factory=list)
     busy_engagements: List[BusyEngagementInfo] = field(default_factory=list)
+    conflict: Optional[ConflictInfo] = None
 
 
 TOOLS = [
@@ -269,6 +271,57 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_availability",
+            "description": (
+                "Deterministically check whether the user is free for a SPECIFIC time window — "
+                "use this for any yes/no availability question ('am I available at X', 'are you "
+                "free Tuesday at 3pm', 'can I do a 1-hour call at 2pm EST on the 10th'). Never "
+                "answer a question like this yourself by eyeballing check_free_slots or "
+                "list_engagements results — manually comparing a specific time against a list of "
+                "busy stretches is exactly the kind of exact computation that's unreliable to do "
+                "by reading, not calculating (the same reason weekday and timezone math are "
+                "handled deterministically elsewhere). This tool does the exact overlap check in "
+                "code and returns a definitive available: true/false — if false, exactly which "
+                "existing engagement conflicts, plus that day's free slots so you can suggest "
+                "alternatives without a second call.\n\n"
+                "If the user gave a duration instead of an explicit end time (e.g. 'free for an "
+                "hour at 2pm'), compute end_time yourself as start_time + that duration."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_time": {
+                        "type": "string",
+                        "description": "Clock digits exactly as stated, no UTC offset — see create_engagement.",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "Clock digits exactly as stated, no UTC offset — see create_engagement.",
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "IANA zone the digits above are in — see create_engagement.",
+                    },
+                    "weekday": {
+                        "type": "string",
+                        "enum": [
+                            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+                        ],
+                        "description": "Set only for a bare day-of-week with no explicit date — see create_engagement.",
+                    },
+                    "weekday_qualifier": {
+                        "type": "string",
+                        "enum": ["soonest", "next"],
+                        "description": "Only meaningful alongside `weekday` — see create_engagement.",
+                    },
+                },
+                "required": ["start_time", "end_time"],
+            },
+        },
+    },
 ]
 
 
@@ -277,7 +330,16 @@ def _build_system_prompt(reference_datetime: datetime, timezone_name: str) -> st
         "You are a scheduling assistant that manages the user's calendar through natural "
         "conversation. Use the provided tools to create, edit, delete, and look up engagements, "
         "and to check free time slots — never claim to have done something without calling the "
-        "matching tool. The user can also add, edit, or delete engagements directly in the app "
+        "matching tool. For any direct yes/no availability question about a SPECIFIC time window "
+        "('am I free at X', 'are you available Tuesday at 3pm', 'can I do an hour at 2pm EST') "
+        "always call check_availability rather than answering it yourself from check_free_slots "
+        "or list_engagements results — deciding whether one specific time overlaps a list of busy "
+        "stretches is exact computation you get wrong often enough to be untrustworthy (it has "
+        "cited an unrelated engagement hours away and declared the user busy at a time that was "
+        "actually free), the same failure mode as weekday and timezone arithmetic below. Use "
+        "check_free_slots instead only for open-ended browsing ('what's free this week', 'find me "
+        "an hour tomorrow') where there's no single specific time to check. The user can also add, "
+        "edit, or delete engagements directly in the app "
         "outside this chat, at any point — so never answer a question about their current "
         "schedule, availability, or whether a specific engagement still exists from memory of an "
         "earlier list_engagements/check_free_slots result in this same conversation; always call "
@@ -321,6 +383,16 @@ def _build_system_prompt(reference_datetime: datetime, timezone_name: str) -> st
         "changed; don't narrate tool mechanics. After check_free_slots, keep the reply to a short "
         "sentence or two (e.g. how many days had openings, or anything notable) — the app displays "
         "the actual slot list as its own widget, so don't repeat it in prose.\n\n"
+        "If create_engagement/update_engagement comes back with a scheduling conflict, or "
+        "check_availability returns available: false, the tool result already includes that same "
+        "day's free/busy schedule — the app renders it as a visual widget with the conflicting "
+        "engagement highlighted, right alongside your reply. Don't ask the user whether they'd "
+        "like you to check availability; that's already done. Just state plainly, in one or two "
+        "sentences, what conflicted with what (name both engagements and the overlapping time), "
+        "and that they can pick one of the open times shown below — don't itemize the slots "
+        "yourself. If check_availability instead returns available: true, the app still renders "
+        "that day's schedule as a widget confirming it — just state plainly, in one sentence, that "
+        "the requested time is free; don't itemize the day's other engagements yourself.\n\n"
         f"Reference datetime (the user's current local time), treat this as 'now': "
         f"{reference_datetime.isoformat()} ({timezone_name})."
     )
@@ -515,7 +587,104 @@ def _localize_engagement(engagement_dump: dict, tzinfo: ZoneInfo) -> dict:
     return engagement_dump
 
 
-ToolResult = Tuple[dict, Optional[EngagementAction], List[FreeSlotItem], List[BusyEngagementInfo]]
+ToolResult = Tuple[dict, Optional[EngagementAction], List[FreeSlotItem], List[BusyEngagementInfo], Optional[ConflictInfo]]
+
+
+def _fetch_day_schedule(
+    session: Session, local_day: date, tzinfo: ZoneInfo
+) -> Tuple[List[FreeSlotItem], List[BusyEngagementInfo]]:
+    """That day's free slots and busy engagements, in the user's local zone —
+    shared by the conflict and availability-confirmed result builders below
+    (both want the same "here's the whole day for context" widget data)."""
+    range_result = resolve_free_slots_for_range(
+        session, date_from=local_day, date_to=local_day, min_duration_minutes=30,
+    )
+    free_slots = [
+        FreeSlotItem(
+            start_time=_utc_to_local_iso(slot.start, tzinfo),
+            end_time=_utc_to_local_iso(slot.end, tzinfo),
+            duration_minutes=int((slot.end - slot.start).total_seconds() // 60),
+        )
+        for slot in range_result.slots[:20]
+    ]
+    busy_engagements = [
+        BusyEngagementInfo(
+            title=engagement.title,
+            category=engagement.category,
+            start_time=_utc_to_local_iso(engagement.start_time, tzinfo),
+            end_time=_utc_to_local_iso(engagement.end_time, tzinfo),
+        )
+        for engagement in range_result.blocking_engagements[:50]
+    ]
+    return free_slots, busy_engagements
+
+
+def _build_conflict_result(session: Session, exc: EngagementConflictError, tzinfo: ZoneInfo) -> ToolResult:
+    """On a scheduling conflict, don't just report failure — also compute
+    that day's free slots and busy engagements (as if the model had called
+    check_free_slots itself) so the app renders the same visual widget right
+    away, plus structured info identifying exactly which existing engagement
+    is in the way, so the UI can highlight it instead of relying on prose.
+    """
+    attempted_title = exc.attempted_title
+    attempted_start_utc = exc.attempted_start
+    attempted_end_utc = exc.attempted_end
+    if attempted_title is None or attempted_start_utc is None or attempted_end_utc is None:
+        return {"status": "error", "message": str(exc)}, None, [], [], None
+
+    local_day = attempted_start_utc.replace(tzinfo=timezone.utc).astimezone(tzinfo).date()
+    free_slots, busy_engagements = _fetch_day_schedule(session, local_day, tzinfo)
+
+    conflicting: Optional[Engagement] = exc.conflicting_engagement
+    if conflicting is not None:
+        conflict_info = ConflictInfo(
+            available=False,
+            attempted_title=attempted_title,
+            attempted_start_time=_utc_to_local_iso(attempted_start_utc, tzinfo),
+            attempted_end_time=_utc_to_local_iso(attempted_end_utc, tzinfo),
+            conflicting_with=BusyEngagementInfo(
+                title=conflicting.title,
+                category=conflicting.category,
+                start_time=_utc_to_local_iso(conflicting.start_time, tzinfo),
+                end_time=_utc_to_local_iso(conflicting.end_time, tzinfo),
+            ),
+        )
+        message = (
+            f"'{attempted_title}' ({_utc_to_local_iso(attempted_start_utc, tzinfo)} to "
+            f"{_utc_to_local_iso(attempted_end_utc, tzinfo)}) conflicts with existing engagement "
+            f"'{conflicting.title}' ({conflict_info.conflicting_with.start_time.isoformat()} to "
+            f"{conflict_info.conflicting_with.end_time.isoformat()})."
+        )
+    else:
+        conflict_info = None
+        message = str(exc)
+
+    result = {
+        "status": "error",
+        "message": message,
+        "free_slots_that_day": [item.model_dump(mode="json") for item in free_slots],
+    }
+    return result, None, free_slots, busy_engagements, conflict_info
+
+
+def _build_availability_result(
+    session: Session, title: str, start_utc: datetime, end_utc: datetime, tzinfo: ZoneInfo
+) -> ToolResult:
+    """check_availability found nothing in the way — still surface that day's
+    schedule for context and a structured confirmation (available=True), so
+    the UI renders a definitive "you're free" widget rather than only prose.
+    """
+    local_day = start_utc.replace(tzinfo=timezone.utc).astimezone(tzinfo).date()
+    free_slots, busy_engagements = _fetch_day_schedule(session, local_day, tzinfo)
+    availability_info = ConflictInfo(
+        available=True,
+        attempted_title=title,
+        attempted_start_time=_utc_to_local_iso(start_utc, tzinfo),
+        attempted_end_time=_utc_to_local_iso(end_utc, tzinfo),
+        conflicting_with=None,
+    )
+    result = {"status": "ok", "available": True}
+    return result, None, free_slots, busy_engagements, availability_info
 
 
 def _apply_weekday_args(
@@ -550,7 +719,7 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
     try:
         args = json.loads(tool_call.function.arguments or "{}")
     except json.JSONDecodeError as exc:
-        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None, [], []
+        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None, [], [], None
 
     try:
         if name == "create_engagement":
@@ -567,18 +736,21 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 category=args["category"],
                 is_blocking=args.get("is_blocking", True),
             )
-            engagement = engagement_service.create_engagement(session, payload)
+            try:
+                engagement = engagement_service.create_engagement(session, payload)
+            except EngagementConflictError as exc:
+                return _build_conflict_result(session, exc, tzinfo)
             action = EngagementAction(
                 type=EngagementActionType.CREATED,
                 engagement=EngagementRead.model_validate(engagement),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, [], []
+            return result, action, [], [], None
 
         if name == "update_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], []
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], [], None
             event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
             update_fields = {
                 k: v for k, v in args.items()
@@ -601,25 +773,28 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 if key in update_fields:
                     update_fields[key] = _localize_tool_datetime(update_fields[key], event_tzinfo)
             payload = EngagementUpdate(**update_fields)
-            engagement = engagement_service.update_engagement(session, engagement_id, payload)
+            try:
+                engagement = engagement_service.update_engagement(session, engagement_id, payload)
+            except EngagementConflictError as exc:
+                return _build_conflict_result(session, exc, tzinfo)
             action = EngagementAction(
                 type=EngagementActionType.UPDATED,
                 engagement=EngagementRead.model_validate(engagement),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, [], []
+            return result, action, [], [], None
 
         if name == "delete_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], []
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], [], None
             snapshot = engagement_service.delete_engagement(session, engagement_id)
             action = EngagementAction(
                 type=EngagementActionType.DELETED,
                 engagement=EngagementRead.model_validate(snapshot),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, [], []
+            return result, action, [], [], None
 
         if name == "list_engagements":
             results = engagement_service.list_engagements(
@@ -635,7 +810,7 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                     _localize_engagement(EngagementRead.model_validate(e).model_dump(mode="json"), tzinfo)
                     for e in results
                 ],
-            }, None, [], []
+            }, None, [], [], None
 
         if name == "check_free_slots":
             range_result = resolve_free_slots_for_range(
@@ -666,14 +841,41 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 "slots": [item.model_dump(mode="json") for item in free_slots],
                 "busy": [item.model_dump(mode="json") for item in busy_engagements],
             }
-            return result, None, free_slots, busy_engagements
+            return result, None, free_slots, busy_engagements, None
 
-        return {"status": "error", "message": f"Unknown tool {name!r}"}, None, [], []
+        if name == "check_availability":
+            event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
+            start_value, end_value = _apply_weekday_args(
+                args["start_time"], args["end_time"], args.get("weekday"), args.get("weekday_qualifier"),
+                reference_datetime,
+            )
+            start_local = _localize_tool_datetime(start_value, event_tzinfo)
+            end_local = _localize_tool_datetime(end_value, event_tzinfo)
+            start_utc = to_naive_utc(datetime.fromisoformat(start_local))
+            end_utc = to_naive_utc(datetime.fromisoformat(end_local))
+            if start_utc >= end_utc:
+                return {"status": "error", "message": "start_time must be before end_time"}, None, [], [], None
+
+            existing = session.exec(select(Engagement)).all()
+            conflict = find_conflicting_engagement(start_utc, end_utc, existing)
+            if conflict is None:
+                return _build_availability_result(session, "Requested time", start_utc, end_utc, tzinfo)
+
+            fabricated_exc = EngagementConflictError(
+                "",
+                conflicting_engagement=conflict,
+                attempted_title="Requested time",
+                attempted_start=start_utc,
+                attempted_end=end_utc,
+            )
+            return _build_conflict_result(session, fabricated_exc, tzinfo)
+
+        return {"status": "error", "message": f"Unknown tool {name!r}"}, None, [], [], None
 
     except (EngagementNotFoundError, EngagementConflictError) as exc:
-        return {"status": "error", "message": str(exc)}, None, [], []
+        return {"status": "error", "message": str(exc)}, None, [], [], None
     except (ValidationError, ValueError, KeyError, TypeError) as exc:
-        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None, [], []
+        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None, [], [], None
 
 
 def send_message(
@@ -711,6 +913,7 @@ def send_message(
     actions: List[EngagementAction] = []
     free_slots: List[FreeSlotItem] = []
     busy_engagements: List[BusyEngagementInfo] = []
+    conflict: Optional[ConflictInfo] = None
 
     for _ in range(settings.CHAT_MAX_TOOL_ROUNDTRIPS):
         messages_for_api = [system_message] + _replay_messages(session, chat_session.id)
@@ -771,13 +974,17 @@ def send_message(
             session.commit()
 
             for tool_call in message.tool_calls:
-                result, action, slots, busy = _execute_tool(session, tool_call, tzinfo, reference_datetime)
+                result, action, slots, busy, tool_conflict = _execute_tool(
+                    session, tool_call, tzinfo, reference_datetime
+                )
                 if action is not None:
                     actions.append(action)
                 if slots:
                     free_slots.extend(slots)
                 if busy:
                     busy_engagements.extend(busy)
+                if tool_conflict is not None:
+                    conflict = tool_conflict
                 session.add(
                     ChatMessage(
                         session_id=chat_session.id,
@@ -812,6 +1019,7 @@ def send_message(
             actions=actions,
             free_slots=free_slots,
             busy_engagements=busy_engagements,
+            conflict=conflict,
         )
 
     raise ChatServiceError(

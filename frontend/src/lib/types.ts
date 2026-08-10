@@ -56,6 +56,22 @@ export interface ChatMessageResponse {
   /** What's occupying the busy stretches within free_slots' shift window —
    * same offset-aware-local convention as free_slots. */
   busy_engagements: BusyEngagementInfo[];
+  /**
+   * Present whenever this turn checked a specific time window against the
+   * calendar — either a create/update that hit a conflict, or a direct
+   * check_availability yes/no question. `available` says which widget to
+   * render; `conflicting_with` is only set when it's false. Only on the live
+   * turn's response, not replayed with chat history.
+   */
+  conflict?: ConflictInfo | null;
+}
+
+export interface ConflictInfo {
+  available: boolean;
+  attempted_title: string;
+  attempted_start_time: string;
+  attempted_end_time: string;
+  conflicting_with: BusyEngagementInfo | null;
 }
 
 export interface ChatHistoryMessageDto {
