@@ -9,6 +9,7 @@ import { useAppState } from "@/lib/appState";
 export default function CalendarPage() {
   const { shift, shiftLoadError, shiftVersion, refreshSignal, triggerRefresh } = useAppState();
   const [focusRequest, setFocusRequest] = useState<{ dateKey: string } | null>(null);
+  const [filterDateKey, setFilterDateKey] = useState<string | null>(null);
 
   return (
     <div className="flex h-full w-full flex-col px-6 py-8">
@@ -27,6 +28,7 @@ export default function CalendarPage() {
               refreshSignal={refreshSignal}
               initialShift={shift}
               focusRequest={focusRequest}
+              onDaySelect={setFilterDateKey}
             />
           ) : (
             <section className="rounded-2xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
@@ -39,6 +41,8 @@ export default function CalendarPage() {
             refreshSignal={refreshSignal}
             onChanged={triggerRefresh}
             onSelectDate={(dateKey) => setFocusRequest({ dateKey })}
+            filterDateKey={filterDateKey}
+            onClearFilter={() => setFilterDateKey(null)}
           />
         </div>
       </div>

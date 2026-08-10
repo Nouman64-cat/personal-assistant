@@ -41,6 +41,13 @@ interface FreeSlotViewerProps {
    * clicking the same date twice in a row re-triggers the jump.
    */
   focusRequest?: { dateKey: string } | null;
+  /**
+   * Called with the drilled-into day's `yyyy-MM-dd` key whenever the user
+   * clicks a day (in the month grid, or via `focusRequest`), and with `null`
+   * when they navigate back out to the month view — lets the parent filter
+   * the engagements list down to the same day.
+   */
+  onDaySelect?: (dateKey: string | null) => void;
 }
 
 function addDaysKey(key: string, days: number): string {
@@ -187,7 +194,7 @@ function computeDayStats(day: Date, engagements: Engagement[], freeSlots: FreeSl
   };
 }
 
-export default function FreeSlotViewer({ refreshSignal, initialShift, focusRequest }: FreeSlotViewerProps) {
+export default function FreeSlotViewer({ refreshSignal, initialShift, focusRequest, onDaySelect }: FreeSlotViewerProps) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
 
@@ -197,6 +204,9 @@ export default function FreeSlotViewer({ refreshSignal, initialShift, focusReque
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMonthCursor(startOfMonth(target));
     setSelectedDayKey(focusRequest.dateKey);
+    onDaySelect?.(focusRequest.dateKey);
+    // onDaySelect is intentionally omitted — see loadData's comment on the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest]);
 
   const dayStartHour = initialShift.day_start_hour.slice(0, 5);
@@ -361,7 +371,10 @@ export default function FreeSlotViewer({ refreshSignal, initialShift, focusReque
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setSelectedDayKey(null)}
+              onClick={() => {
+                setSelectedDayKey(null);
+                onDaySelect?.(null);
+              }}
               className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -443,7 +456,10 @@ export default function FreeSlotViewer({ refreshSignal, initialShift, focusReque
             monthCursor={monthCursor}
             daySummaries={daySummaries}
             shiftMinutes={shiftMinutes}
-            onSelectDay={setSelectedDayKey}
+            onSelectDay={(dateKey) => {
+              setSelectedDayKey(dateKey);
+              onDaySelect?.(dateKey);
+            }}
           />
         )}
       </div>

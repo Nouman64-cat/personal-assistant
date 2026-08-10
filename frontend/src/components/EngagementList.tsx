@@ -25,6 +25,10 @@ interface EngagementListProps {
   onChanged?: () => void;
   /** Called with a `yyyy-MM-dd` key when the user wants to jump the calendar to that engagement's date. */
   onSelectDate?: (dateKey: string) => void;
+  /** When set, only engagements starting on this `yyyy-MM-dd` day are shown (e.g. after clicking a day in the calendar grid). */
+  filterDateKey?: string | null;
+  /** Called when the user clears the active date filter. */
+  onClearFilter?: () => void;
 }
 
 interface DayGroup {
@@ -74,7 +78,13 @@ function formatStartsIn(start: Date, now: Date): string {
   return remainder === 0 ? `in ${hours}h` : `in ${hours}h ${remainder}m`;
 }
 
-export default function EngagementList({ refreshSignal, onChanged, onSelectDate }: EngagementListProps) {
+export default function EngagementList({
+  refreshSignal,
+  onChanged,
+  onSelectDate,
+  filterDateKey,
+  onClearFilter,
+}: EngagementListProps) {
   const [engagements, setEngagements] = useState<Engagement[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -148,9 +158,12 @@ export default function EngagementList({ refreshSignal, onChanged, onSelectDate 
     setConfirmingId(null);
   }
 
-  const filtered = query.trim()
-    ? engagements.filter((engagement) => engagement.title.toLowerCase().includes(query.trim().toLowerCase()))
+  const dateFiltered = filterDateKey
+    ? engagements.filter((engagement) => toDateKey(parseNaiveIso(engagement.start_time)) === filterDateKey)
     : engagements;
+  const filtered = query.trim()
+    ? dateFiltered.filter((engagement) => engagement.title.toLowerCase().includes(query.trim().toLowerCase()))
+    : dateFiltered;
   const { upcoming, past } = groupEngagements(filtered, now);
   const isEmpty = upcoming.length === 0 && past.length === 0;
 
@@ -255,6 +268,20 @@ export default function EngagementList({ refreshSignal, onChanged, onSelectDate 
         Everything currently on the calendar.
       </p>
 
+      {filterDateKey && (
+        <div className="mt-3 flex shrink-0 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 dark:border-violet-900/40 dark:bg-violet-500/10 dark:text-violet-300">
+          <span>Showing {formatDayLabel(parseDateKey(filterDateKey))}</span>
+          <button
+            type="button"
+            onClick={onClearFilter}
+            aria-label="Clear date filter"
+            className="ml-auto rounded p-0.5 transition hover:bg-violet-100 dark:hover:bg-violet-500/20"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {engagements.length > 3 && (
         <div className="relative mt-3 shrink-0">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
@@ -283,7 +310,11 @@ export default function EngagementList({ refreshSignal, onChanged, onSelectDate 
         ) : isEmpty ? (
           <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
             <CalendarX2 className="h-6 w-6" />
-            {query.trim() ? "No engagements match your search." : "Nothing scheduled yet. Try the Chat page to add something."}
+            {query.trim()
+              ? "No engagements match your search."
+              : filterDateKey
+                ? "No engagements on this day."
+                : "Nothing scheduled yet. Try the Chat page to add something."}
           </div>
         ) : (
           <>
