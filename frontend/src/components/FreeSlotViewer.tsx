@@ -857,28 +857,38 @@ function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots
           </div>
         ))}
 
-        {busyBlocks.map(({ item: engagement, topPct, heightPct, col, cols }) => (
-          <div
-            key={engagement.id}
-            title={`${engagement.title} — ${CATEGORY_LABELS[engagement.category]} (${formatTime(
-              engagement.start_time,
-            )} – ${formatTime(engagement.end_time)})`}
-            className={`absolute z-20 overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] font-medium text-white ${CATEGORY_BLOCK_CLASSES[engagement.category]}`}
-            style={{
-              top: `${topPct}%`,
-              height: `${heightPct}%`,
-              left: `calc(${(col / cols) * 100}% + 2px)`,
-              width: `calc(${100 / cols}% - 4px)`,
-            }}
-          >
-            <span className="block truncate">{engagement.title}</span>
-            {heightPct > 4 && (
-              <span className="block truncate text-[10px] text-white/80">
-                {formatTime(engagement.start_time)}
-              </span>
-            )}
-          </div>
-        ))}
+        {busyBlocks.map(({ item: engagement, topPct, heightPct, col, cols }) => {
+          const timeRange = `${formatTime(engagement.start_time)} – ${formatTime(engagement.end_time)}`;
+          // Pixel height (not just heightPct) decides how the time fits: tall
+          // enough for two lines, a single combined line for short (e.g.
+          // 30min) meetings, or title-only when there's no room for either.
+          const blockPx = (heightPct / 100) * GRID_HEIGHT_PX;
+          return (
+            <div
+              key={engagement.id}
+              title={`${engagement.title} — ${CATEGORY_LABELS[engagement.category]} (${timeRange})`}
+              className={`absolute z-20 overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] font-medium text-white ${CATEGORY_BLOCK_CLASSES[engagement.category]}`}
+              style={{
+                top: `${topPct}%`,
+                height: `${heightPct}%`,
+                left: `calc(${(col / cols) * 100}% + 2px)`,
+                width: `calc(${100 / cols}% - 4px)`,
+              }}
+            >
+              {blockPx >= 32 ? (
+                <>
+                  <span className="block truncate">{engagement.title}</span>
+                  <span className="block truncate text-[10px] text-white/80">{timeRange}</span>
+                </>
+              ) : (
+                <span className="block truncate">
+                  {engagement.title}
+                  {blockPx >= 14 && <span className="text-white/80"> · {timeRange}</span>}
+                </span>
+              )}
+            </div>
+          );
+        })}
 
         {nowTopPct !== null && (
           <div className="absolute inset-x-0 z-30" style={{ top: `${nowTopPct}%` }}>

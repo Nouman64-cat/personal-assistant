@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -67,25 +67,60 @@ TOOLS = [
                     "start_time": {
                         "type": "string",
                         "description": (
-                            "Local wall-clock date and time, with NO UTC offset — just the digits "
-                            "as stated, e.g. '2026-08-11T15:00:00' for 3pm. Never compute or attach "
-                            "a UTC offset yourself; `timezone` below carries the zone instead."
+                            "The clock digits EXACTLY as the user said them — a straight transcription, "
+                            "not a conversion. NO UTC offset, e.g. '2026-08-11T15:00:00' for 'tomorrow at "
+                            "3pm'. If they said '10am EST', write 10:00 here (not whatever 10am EST would "
+                            "be in your own or the user's zone) — `timezone` below is what carries the "
+                            "zone those digits belong to; that's its only job. Never do the arithmetic to "
+                            "shift these digits into another zone yourself, in either direction."
                         ),
                     },
                     "end_time": {
                         "type": "string",
-                        "description": "Local wall-clock date and time, no UTC offset — same rules as start_time.",
+                        "description": "Clock digits exactly as stated, no UTC offset — same rules as start_time.",
                     },
                     "timezone": {
                         "type": "string",
                         "description": (
-                            "IANA timezone name that start_time/end_time's clock digits are in, e.g. "
-                            "'Asia/Karachi'. Defaults to the user's own timezone (given in the system "
-                            "prompt) — only set this to something else when the user explicitly named "
-                            "a different zone for this event (an abbreviation, UTC offset, or "
-                            "city/region). Resolve abbreviations to their IANA name yourself: "
-                            "EST/EDT = America/New_York, CST/CDT = America/Chicago, "
-                            "MST/MDT = America/Denver, PST/PDT = America/Los_Angeles."
+                            "IANA name of whichever zone the start_time/end_time digits above were "
+                            "actually spoken in. Defaults to the user's own timezone (given in the "
+                            "system prompt) when they named no zone at all. When they DID name a zone "
+                            "for this event (an abbreviation, UTC offset, or city/region), this must be "
+                            "THAT zone, resolved to its IANA name — EST/EDT = America/New_York, CST/CDT "
+                            "= America/Chicago, MST/MDT = America/Denver, PST/PDT = America/Los_Angeles "
+                            "— paired with the UNCONVERTED digits above. Example: user's own zone is "
+                            "Asia/Karachi and they say '10am EST' — start_time='...T10:00:00' (10, not "
+                            "converted to any other hour) and timezone='America/New_York' (the zone they "
+                            "named, not the user's own). Getting either half of this pair wrong — "
+                            "converting the digits AND keeping the original zone name, or vice versa — "
+                            "double-converts or under-converts and lands on the wrong instant."
+                        ),
+                    },
+                    "weekday": {
+                        "type": "string",
+                        "enum": [
+                            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+                        ],
+                        "description": (
+                            "Set this ONLY when the user named a bare day-of-week with no explicit "
+                            "calendar date ('Monday', 'next Friday', 'this Saturday') — NOT for an "
+                            "explicit date, 'today', or 'tomorrow' (leave unset for those; resolve them "
+                            "yourself as usual, that arithmetic is simple and reliable). When set, the "
+                            "app — not you — computes which exact date that weekday falls on; the date "
+                            "digits you wrote in start_time/end_time above are discarded and only their "
+                            "clock time is kept, so don't worry about getting the date right there."
+                        ),
+                    },
+                    "weekday_qualifier": {
+                        "type": "string",
+                        "enum": ["soonest", "next"],
+                        "description": (
+                            "Only meaningful alongside `weekday`. 'soonest' (the default — omit this "
+                            "field to get it) resolves to the nearest occurrence of that weekday, "
+                            "counting today itself if today already is that weekday. Set to 'next' only "
+                            "when the user explicitly used the word 'next' (e.g. 'next Monday') — that "
+                            "always skips ahead one more week, even if this week's occurrence hasn't "
+                            "happened yet."
                         ),
                     },
                     "category": {"type": "string", "enum": [c.value for c in EngagementCategory]},
@@ -108,15 +143,27 @@ TOOLS = [
                     "description": {"type": "string"},
                     "start_time": {
                         "type": "string",
-                        "description": "Local wall-clock date and time, no UTC offset — see create_engagement.",
+                        "description": "Clock digits exactly as stated, no UTC offset — see create_engagement.",
                     },
                     "end_time": {
                         "type": "string",
-                        "description": "Local wall-clock date and time, no UTC offset — see create_engagement.",
+                        "description": "Clock digits exactly as stated, no UTC offset — see create_engagement.",
                     },
                     "timezone": {
                         "type": "string",
-                        "description": "IANA zone for start_time/end_time — see create_engagement. Only needed when start_time or end_time is being changed.",
+                        "description": "IANA zone the start_time/end_time digits are in — see create_engagement. Only needed when start_time or end_time is being changed.",
+                    },
+                    "weekday": {
+                        "type": "string",
+                        "enum": [
+                            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+                        ],
+                        "description": "Set only when moving this to a bare day-of-week with no explicit date — see create_engagement.",
+                    },
+                    "weekday_qualifier": {
+                        "type": "string",
+                        "enum": ["soonest", "next"],
+                        "description": "Only meaningful alongside `weekday` — see create_engagement.",
                     },
                     "category": {"type": "string", "enum": [c.value for c in EngagementCategory]},
                     "is_blocking": {"type": "boolean"},
@@ -144,9 +191,16 @@ TOOLS = [
         "function": {
             "name": "list_engagements",
             "description": (
-                "Look up existing engagements to resolve references like 'that meeting' or 'the "
-                "interview tomorrow'. Always call this first if you don't already know the "
-                "engagement_id from earlier in this conversation. Never guess an id.\n\n"
+                "Look up existing engagements — both to answer any question about what's on the "
+                "calendar (e.g. 'do I have anything today', 'what's my schedule tomorrow') and to "
+                "resolve references like 'that meeting' or 'the interview tomorrow' before an "
+                "update/delete. Never guess an id.\n\n"
+                "Call this fresh every time, even if this same conversation already listed "
+                "engagements earlier — the user can add, edit, or delete things outside this chat "
+                "(directly in the app) between messages, so an earlier tool result in this "
+                "conversation is not reliable evidence of the current state. Only skip the lookup "
+                "when you already learned the specific engagement_id you need earlier in this same "
+                "conversation and nothing about that engagement is in question.\n\n"
                 "title_contains is a literal substring match against the stored title — it does NOT "
                 "understand synonyms, and the user's own words for the category (e.g. calling it 'the "
                 "interview') may not match what it was actually saved as (e.g. 'Meeting with Faraz'). "
@@ -223,20 +277,43 @@ def _build_system_prompt(reference_datetime: datetime, timezone_name: str) -> st
         "You are a scheduling assistant that manages the user's calendar through natural "
         "conversation. Use the provided tools to create, edit, delete, and look up engagements, "
         "and to check free time slots — never claim to have done something without calling the "
-        "matching tool. Resolve relative or vague date/time expressions (e.g. 'tomorrow at 3pm', "
-        "'next Tuesday') using the reference datetime below as 'now'. Timestamps that tools return "
-        "to you (engagements, free slots) are already in the user's local timezone (given below), "
-        "each with that zone's own UTC offset — read the wall-clock digits directly when "
+        "matching tool. The user can also add, edit, or delete engagements directly in the app "
+        "outside this chat, at any point — so never answer a question about their current "
+        "schedule, availability, or whether a specific engagement still exists from memory of an "
+        "earlier list_engagements/check_free_slots result in this same conversation; always call "
+        "the tool again first, even if you answered the same question a moment ago. Resolve "
+        "relative date expressions (e.g. 'today', 'tomorrow', an explicit date) yourself using "
+        "the reference datetime below as 'now' — that's simple day-count arithmetic. A bare "
+        "day-of-week with no explicit date ('Monday', 'next Tuesday') is different and mandatory "
+        "to handle specially: before every single create_engagement/update_engagement call, check "
+        "whether the user named a day-of-week with no explicit date for it, and if so you MUST set "
+        "that tool's `weekday` field — there is no case where computing the date yourself instead "
+        "is acceptable. This isn't a suggestion to prefer when convenient; skipping it is a "
+        "correctness bug, and it is the single most common way this app books an event on the "
+        "wrong day. DO NOT compute which calendar date the named weekday falls on yourself, even "
+        "as a fallback value written into start_time/end_time — weekday arithmetic is exactly the "
+        "kind of exact computation you get wrong often enough to be untrustworthy for this (a "
+        "plain 'Monday' has been booked several days off, once landing on a Saturday). What you "
+        "write in start_time/end_time's date portion in that case doesn't matter at all — the app "
+        "discards it — so there's no reason not to set `weekday`; only the clock digits you write "
+        "there survive. Timestamps that tools "
+        "return to you (engagements, free slots) are already in the user's local timezone (given "
+        "below), each with that zone's own UTC offset — read the wall-clock digits directly when "
         "describing them, no conversion needed.\n\n"
-        "For create_engagement/update_engagement, give start_time/end_time as bare local "
-        "wall-clock digits with NO UTC offset — never compute or attach one yourself, and never "
-        "convert a stated time into another zone's clock digits by hand. Instead, pass the "
-        "separate `timezone` field naming whichever IANA zone those digits are actually in: the "
-        "user's own timezone (given below) by default, or the specific zone they explicitly named "
-        "for that event otherwise (an abbreviation, UTC offset, or city/region — resolve it to its "
-        "IANA name yourself, e.g. EST/EDT = America/New_York). The app converts everything to the "
-        "correct absolute instant deterministically from those two pieces — offset arithmetic and "
-        "daylight saving are not something you need to reason about.\n\n"
+        "For create_engagement/update_engagement, give start_time/end_time as the clock digits "
+        "EXACTLY as the user stated them, with NO UTC offset — a transcription, not a conversion. "
+        "Pass the separate `timezone` field naming whichever IANA zone those exact digits belong "
+        "to: the user's own timezone (given below) by default, or the specific zone they "
+        "explicitly named for that event otherwise (an abbreviation, UTC offset, or city/region — "
+        "resolve it to its IANA name yourself, e.g. EST/EDT = America/New_York). Do the zone "
+        "lookup, but never the arithmetic — don't shift the digits into another zone by hand in "
+        "either direction, and don't figure out what the equivalent time would be in the user's "
+        "own zone and pass THAT instead. Example: user's own zone is Asia/Karachi and they say "
+        "'10am EST' — start_time gets '...T10:00:00' (10 untouched, not converted to any other "
+        "hour) and timezone gets 'America/New_York' (the zone they actually named, not the user's "
+        "own) — the app converts that pair to the correct absolute instant deterministically. "
+        "Mixing the two — converted digits paired with the original zone name, or vice versa — "
+        "silently lands on the wrong instant (and often the wrong calendar day too).\n\n"
         "When the user refers to an existing engagement ('that meeting', 'the interview'), "
         "resolve it via list_engagements (or an id you already learned earlier in this "
         "conversation) before calling update_engagement or delete_engagement — never guess an id. "
@@ -357,6 +434,66 @@ def _localize_tool_datetime(value: object, event_tzinfo: ZoneInfo) -> object:
     return parsed.replace(tzinfo=event_tzinfo).isoformat()
 
 
+_WEEKDAY_INDEX = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+
+def _resolve_weekday_date(reference_date: date, weekday_name: object, qualifier: object) -> date:
+    """Deterministically resolve a bare day-of-week (e.g. 'monday') to a concrete date.
+
+    Weekday arithmetic is exactly the kind of exact computation the model
+    gets wrong often enough to be untrustworthy (mirrors the timezone-offset
+    problem) — a request for a plain 'Monday' has landed on a Saturday five
+    days later. Doing it here instead makes that class of bug structurally
+    impossible. 'soonest' (the default) counts today itself if today already
+    matches; 'next' always skips ahead one more week, for when the user
+    explicitly said the word 'next'.
+    """
+    target = _WEEKDAY_INDEX.get(str(weekday_name).strip().lower())
+    if target is None:
+        raise ValueError(f"Unknown weekday: {weekday_name!r}")
+    days_ahead = (target - reference_date.weekday()) % 7
+    resolved = reference_date + timedelta(days=days_ahead)
+    if str(qualifier).strip().lower() == "next":
+        resolved += timedelta(days=7)
+    return resolved
+
+
+def _apply_weekday_override(value: object, resolved_date: date) -> object:
+    """Replace the date portion of a model-supplied local datetime string with
+    a deterministically-resolved date, keeping only its clock digits.
+
+    Used whenever the model set `weekday` — its own guess at which calendar
+    date that weekday falls on (baked into start_time/end_time as ordinary
+    ISO digits) is discarded in favor of the code-computed date from
+    `_resolve_weekday_date`; only the hour/minute/second survive. The model
+    quite reasonably sometimes writes bare clock digits with no date at all
+    here (since it knows `weekday` governs the date) — handle that directly
+    rather than letting it fall through to a hard Pydantic validation error,
+    which has been observed to make a retry abandon `weekday` altogether and
+    land on the wrong day anyway.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value)
+        return parsed.replace(year=resolved_date.year, month=resolved_date.month, day=resolved_date.day).isoformat()
+    except ValueError:
+        pass
+    try:
+        parsed_time = dt_time.fromisoformat(value)
+    except ValueError:
+        return value
+    return datetime.combine(resolved_date, parsed_time).isoformat()
+
+
 def _utc_to_local_iso(value: datetime, tzinfo: ZoneInfo) -> str:
     """Convert a naive UTC datetime to an ISO string in the user's local zone.
 
@@ -381,7 +518,34 @@ def _localize_engagement(engagement_dump: dict, tzinfo: ZoneInfo) -> dict:
 ToolResult = Tuple[dict, Optional[EngagementAction], List[FreeSlotItem], List[BusyEngagementInfo]]
 
 
-def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
+def _apply_weekday_args(
+    start_value: object, end_value: object, weekday: object, qualifier: object, reference_datetime: datetime
+) -> Tuple[object, object]:
+    """If `weekday` was set, override start/end's date with the deterministically
+    resolved one, then fix up overnight rollover (an event whose resolved end
+    clock time isn't after its start clock time crosses midnight, so its date
+    needs to land one day later than the start's).
+    """
+    if not weekday:
+        return start_value, end_value
+
+    resolved_date = _resolve_weekday_date(reference_datetime.date(), weekday, qualifier)
+    start_value = _apply_weekday_override(start_value, resolved_date)
+    end_value = _apply_weekday_override(end_value, resolved_date)
+
+    if isinstance(start_value, str) and isinstance(end_value, str):
+        try:
+            parsed_start = datetime.fromisoformat(start_value)
+            parsed_end = datetime.fromisoformat(end_value)
+        except ValueError:
+            return start_value, end_value
+        if parsed_end <= parsed_start:
+            end_value = (parsed_end + timedelta(days=1)).isoformat()
+
+    return start_value, end_value
+
+
+def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datetime: datetime) -> ToolResult:
     name = tool_call.function.name
     try:
         args = json.loads(tool_call.function.arguments or "{}")
@@ -391,11 +555,15 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
     try:
         if name == "create_engagement":
             event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
+            start_value, end_value = _apply_weekday_args(
+                args["start_time"], args["end_time"], args.get("weekday"), args.get("weekday_qualifier"),
+                reference_datetime,
+            )
             payload = EngagementCreate(
                 title=args["title"],
                 description=args.get("description"),
-                start_time=_localize_tool_datetime(args["start_time"], event_tzinfo),
-                end_time=_localize_tool_datetime(args["end_time"], event_tzinfo),
+                start_time=_localize_tool_datetime(start_value, event_tzinfo),
+                end_time=_localize_tool_datetime(end_value, event_tzinfo),
                 category=args["category"],
                 is_blocking=args.get("is_blocking", True),
             )
@@ -412,7 +580,23 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
             if engagement_id is None:
                 return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], []
             event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
-            update_fields = {k: v for k, v in args.items() if k not in ("engagement_id", "timezone")}
+            update_fields = {
+                k: v for k, v in args.items()
+                if k not in ("engagement_id", "timezone", "weekday", "weekday_qualifier")
+            }
+            if "start_time" in update_fields or "end_time" in update_fields:
+                new_start, new_end = _apply_weekday_args(
+                    update_fields.get("start_time"), update_fields.get("end_time"),
+                    args.get("weekday"), args.get("weekday_qualifier"), reference_datetime,
+                )
+                # Only write back keys the model actually included — synthesizing
+                # e.g. an end_time=None here (when only start_time was being
+                # changed) would make EngagementUpdate treat it as an explicit
+                # "clear this field" instead of "leave it alone".
+                if "start_time" in update_fields:
+                    update_fields["start_time"] = new_start
+                if "end_time" in update_fields:
+                    update_fields["end_time"] = new_end
             for key in ("start_time", "end_time"):
                 if key in update_fields:
                     update_fields[key] = _localize_tool_datetime(update_fields[key], event_tzinfo)
@@ -487,9 +671,9 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo) -> ToolResult:
         return {"status": "error", "message": f"Unknown tool {name!r}"}, None, [], []
 
     except (EngagementNotFoundError, EngagementConflictError) as exc:
-        return {"status": "error", "message": str(exc)}, None, []
+        return {"status": "error", "message": str(exc)}, None, [], []
     except (ValidationError, ValueError, KeyError, TypeError) as exc:
-        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None, []
+        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None, [], []
 
 
 def send_message(
@@ -587,7 +771,7 @@ def send_message(
             session.commit()
 
             for tool_call in message.tool_calls:
-                result, action, slots, busy = _execute_tool(session, tool_call, tzinfo)
+                result, action, slots, busy = _execute_tool(session, tool_call, tzinfo, reference_datetime)
                 if action is not None:
                     actions.append(action)
                 if slots:
