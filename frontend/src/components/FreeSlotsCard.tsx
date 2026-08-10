@@ -72,14 +72,15 @@ function buildBusyIntervals(windowStart: Date, windowEnd: Date, freeSlots: FreeS
   return busy;
 }
 
-/** The engagement responsible for a given busy interval, matched by time
- * overlap — undefined if none is found (shouldn't normally happen, but the
- * tooltip falls back to a plain "Busy" label rather than breaking). */
-function findBusyEngagement(interval: Interval, busyEngagements: BusyEngagementInfo[]): BusyEngagementInfo | undefined {
+/** The engagement (if any) actually covering a given instant — used to
+ * resolve a segment to the specific meeting it falls in, rather than
+ * whichever meeting happens to overlap the wider merged busy block it sits
+ * inside (that block may span several back-to-back meetings plus buffer). */
+function findBusyEngagementAt(instant: Date, busyEngagements: BusyEngagementInfo[]): BusyEngagementInfo | undefined {
   return busyEngagements.find((engagement) => {
     const start = new Date(engagement.start_time);
     const end = new Date(engagement.end_time);
-    return start < interval.end && end > interval.start;
+    return start <= instant && end > instant;
   });
 }
 
@@ -211,12 +212,23 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift, highlight
             const segStart = addMinutes(windowStart, index * SEGMENT_MINUTES);
             const segMid = addMinutes(segStart, SEGMENT_MINUTES / 2);
             const freeMatch = freeIntervals.find((iv) => iv.start <= segMid && iv.end > segMid);
-            if (freeMatch) return { isFree: true as const, interval: freeMatch };
+            if (freeMatch) return { isFree: true as const, interval: freeMatch, engagement: undefined };
+            // Resolve to the specific engagement covering this segment (if
+            // any) rather than the merged busy block it sits inside, which
+            // may span several back-to-back meetings plus buffer time.
+            const engagementMatch = findBusyEngagementAt(segMid, busyEngagements);
+            if (engagementMatch) {
+              return {
+                isFree: false as const,
+                interval: { start: new Date(engagementMatch.start_time), end: new Date(engagementMatch.end_time) },
+                engagement: engagementMatch,
+              };
+            }
             const busyMatch = busyIntervals.find((iv) => iv.start <= segMid && iv.end > segMid) ?? {
               start: segStart,
               end: addMinutes(segStart, SEGMENT_MINUTES),
             };
-            return { isFree: false as const, interval: busyMatch };
+            return { isFree: false as const, interval: busyMatch, engagement: undefined };
           });
 
           // Where the calendar date rolls over within an overnight bar, so
@@ -236,8 +248,7 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift, highlight
               </div>
               <div className="relative pb-3">
                 <div className="flex h-6 gap-px">
-                  {segments.map(({ isFree, interval }, index) => {
-                    const engagement = isFree ? undefined : findBusyEngagement(interval, busyEngagements);
+                  {segments.map(({ isFree, interval, engagement }, index) => {
                     const isHighlighted = overlapsRange(interval, highlightRange);
                     return (
                       <div key={index} className="group relative flex-1">
