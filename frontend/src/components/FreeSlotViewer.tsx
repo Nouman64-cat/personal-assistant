@@ -34,6 +34,13 @@ interface FreeSlotViewerProps {
    * once per mount rather than reactively synced.
    */
   initialShift: ShiftSettings;
+  /**
+   * Set this (a new object each time, even for the same date) to jump the
+   * viewer straight into that day's detail view — e.g. from EngagementList's
+   * "view on calendar" action. A fresh object identity is required so
+   * clicking the same date twice in a row re-triggers the jump.
+   */
+  focusRequest?: { dateKey: string } | null;
 }
 
 function addDaysKey(key: string, days: number): string {
@@ -180,9 +187,17 @@ function computeDayStats(day: Date, engagements: Engagement[], freeSlots: FreeSl
   };
 }
 
-export default function FreeSlotViewer({ refreshSignal, initialShift }: FreeSlotViewerProps) {
+export default function FreeSlotViewer({ refreshSignal, initialShift, focusRequest }: FreeSlotViewerProps) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const target = parseDateKey(focusRequest.dateKey);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMonthCursor(startOfMonth(target));
+    setSelectedDayKey(focusRequest.dateKey);
+  }, [focusRequest]);
 
   const dayStartHour = initialShift.day_start_hour.slice(0, 5);
   const dayEndHour = initialShift.day_end_hour.slice(0, 5);
