@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarClock, Clock, MessageSquare, Sparkles } from "lucide-react";
+import { CalendarClock, Clock, Layers, MessageSquare, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/calendar", label: "Calendar", icon: CalendarClock },
+  { href: "/engagements", label: "Engagements", icon: Layers },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/shift-settings", label: "Shift Settings", icon: Clock },
 ] as const;
