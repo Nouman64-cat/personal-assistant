@@ -1057,8 +1057,8 @@ function DayColumn({
 
         {nowTopPct !== null && (
           <div className="absolute inset-x-0 z-30" style={{ top: `${nowTopPct}%` }}>
-            <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-red-500" />
-            <div className="border-t-2 border-red-500" />
+            <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-blue-500" />
+            <div className="border-t-2 border-blue-500" />
           </div>
         )}
       </div>
