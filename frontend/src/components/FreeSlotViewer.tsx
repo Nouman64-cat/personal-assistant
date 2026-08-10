@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, CalendarClock, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
+import EngagementFormModal from "@/components/EngagementFormModal";
 import { ApiError, getFreeSlots, listEngagements } from "@/lib/api";
 import type { Engagement, EngagementCategory, FreeSlotItem, ShiftSettings } from "@/lib/types";
 import {
@@ -48,6 +49,8 @@ interface FreeSlotViewerProps {
    * the engagements list down to the same day.
    */
   onDaySelect?: (dateKey: string | null) => void;
+  /** Called after an engagement is added, edited, or deleted from the day-detail view, so siblings (e.g. EngagementList) can refetch. */
+  onChanged?: () => void;
 }
 
 function addDaysKey(key: string, days: number): string {
@@ -194,9 +197,28 @@ function computeDayStats(day: Date, engagements: Engagement[], freeSlots: FreeSl
   };
 }
 
-export default function FreeSlotViewer({ refreshSignal, initialShift, focusRequest, onDaySelect }: FreeSlotViewerProps) {
+type ModalState =
+  | { mode: "create"; start: Date; end: Date }
+  | { mode: "edit"; engagement: Engagement };
+
+/** Default new-engagement window for a slot click: up to an hour, capped to the free slot itself. */
+function defaultCreateWindow(slot: FreeSlotItem): { start: Date; end: Date } {
+  const start = parseNaiveIso(slot.start_time);
+  const slotEnd = parseNaiveIso(slot.end_time);
+  const cappedEnd = new Date(Math.min(start.getTime() + 60 * 60_000, slotEnd.getTime()));
+  return { start, end: cappedEnd };
+}
+
+export default function FreeSlotViewer({
+  refreshSignal,
+  initialShift,
+  focusRequest,
+  onDaySelect,
+  onChanged,
+}: FreeSlotViewerProps) {
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+  const [modalState, setModalState] = useState<ModalState | null>(null);
 
   useEffect(() => {
     if (!focusRequest) return;
@@ -463,6 +485,9 @@ export default function FreeSlotViewer({ refreshSignal, initialShift, focusReque
                 dayEndMinutes={dayEndMinutes}
                 engagements={blockingEngagements}
                 freeSlots={freeSlots}
+                onSlotClick={(slot) => setModalState({ mode: "create", ...defaultCreateWindow(slot) })}
+                onEngagementClick={(engagement) => setModalState({ mode: "edit", engagement })}
+                onEmptyTimeClick={(start, end) => setModalState({ mode: "create", start, end })}
               />
             </div>
             <div className="flex shrink-0 items-center justify-between">
@@ -496,6 +521,25 @@ export default function FreeSlotViewer({ refreshSignal, initialShift, focusReque
           />
         )}
       </div>
+
+      {modalState && (
+        <EngagementFormModal
+          mode={modalState.mode}
+          initialStart={modalState.mode === "create" ? modalState.start : parseNaiveIso(modalState.engagement.start_time)}
+          initialEnd={modalState.mode === "create" ? modalState.end : parseNaiveIso(modalState.engagement.end_time)}
+          initialTitle={modalState.mode === "edit" ? modalState.engagement.title : undefined}
+          initialDescription={modalState.mode === "edit" ? modalState.engagement.description : undefined}
+          initialCategory={modalState.mode === "edit" ? modalState.engagement.category : undefined}
+          initialIsBlocking={modalState.mode === "edit" ? modalState.engagement.is_blocking : undefined}
+          engagementId={modalState.mode === "edit" ? modalState.engagement.id : undefined}
+          onClose={() => setModalState(null)}
+          onSaved={() => {
+            setModalState(null);
+            loadData();
+            onChanged?.();
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -783,9 +827,22 @@ interface CalendarGridProps {
   dayEndMinutes: number;
   engagements: Engagement[];
   freeSlots: FreeSlotItem[];
+  onSlotClick?: (slot: FreeSlotItem) => void;
+  onEngagementClick?: (engagement: Engagement) => void;
+  /** Called with a default hour-long window when the user clicks blank timeline space — including off-shift hours, which have no free-slot data of their own. */
+  onEmptyTimeClick?: (start: Date, end: Date) => void;
 }
 
-function CalendarGrid({ days, dayStartMinutes, dayEndMinutes, engagements, freeSlots }: CalendarGridProps) {
+function CalendarGrid({
+  days,
+  dayStartMinutes,
+  dayEndMinutes,
+  engagements,
+  freeSlots,
+  onSlotClick,
+  onEngagementClick,
+  onEmptyTimeClick,
+}: CalendarGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -827,6 +884,9 @@ function CalendarGrid({ days, dayStartMinutes, dayEndMinutes, engagements, freeS
               dayEndMinutes={dayEndMinutes}
               engagements={engagements}
               freeSlots={freeSlots}
+              onSlotClick={onSlotClick}
+              onEngagementClick={onEngagementClick}
+              onEmptyTimeClick={onEmptyTimeClick}
             />
           ))}
         </div>
@@ -841,9 +901,21 @@ interface DayColumnProps {
   dayEndMinutes: number;
   engagements: Engagement[];
   freeSlots: FreeSlotItem[];
+  onSlotClick?: (slot: FreeSlotItem) => void;
+  onEngagementClick?: (engagement: Engagement) => void;
+  onEmptyTimeClick?: (start: Date, end: Date) => void;
 }
 
-function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots }: DayColumnProps) {
+function DayColumn({
+  day,
+  dayStartMinutes,
+  dayEndMinutes,
+  engagements,
+  freeSlots,
+  onSlotClick,
+  onEngagementClick,
+  onEmptyTimeClick,
+}: DayColumnProps) {
   // dayStartMinutes > dayEndMinutes means the shift is overnight (e.g. 18:00
   // to 02:00) — it recurs daily as two segments: the evening it starts, and
   // the tail end carrying into the following morning.
@@ -851,6 +923,21 @@ function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots
 
   const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0);
   const dayEnd = minutesToDate(dayStart, 24 * 60);
+
+  // Lets the user click any blank stretch of the timeline — including
+  // off-shift hours, which have no free-slot data of their own — to add an
+  // engagement starting there. Snapped to 15-minute increments; free/busy
+  // blocks stop propagation so clicking them doesn't also fire this.
+  function handleBackgroundClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!onEmptyTimeClick) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const totalMinutes = 24 * 60;
+    const rawMinutes = ((event.clientY - rect.top) / rect.height) * totalMinutes;
+    const snappedMinutes = Math.min(totalMinutes - 15, Math.max(0, Math.round(rawMinutes / 15) * 15));
+    const start = minutesToDate(dayStart, snappedMinutes);
+    const end = minutesToDate(dayStart, Math.min(totalMinutes, snappedMinutes + 60));
+    onEmptyTimeClick(start, end);
+  }
 
   const shiftBlocks = (
     isOvernight ? [[dayStartMinutes, 24 * 60], [0, dayEndMinutes]] : [[dayStartMinutes, dayEndMinutes]]
@@ -891,7 +978,11 @@ function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots
         <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{formatDayLabel(day)}</span>
       </div>
 
-      <div className="relative" style={{ height: GRID_HEIGHT_PX }}>
+      <div
+        className={cn("relative", onEmptyTimeClick && "cursor-pointer")}
+        style={{ height: GRID_HEIGHT_PX }}
+        onClick={handleBackgroundClick}
+      >
         {Array.from({ length: 23 }, (_, index) => (
           <div
             key={index}
@@ -909,16 +1000,21 @@ function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots
         ))}
 
         {freeBlocks.map(({ item: slot, topPct, heightPct }, index) => (
-          <div
+          <button
             key={`free-${index}`}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSlotClick?.(slot);
+            }}
             title={`Free: ${formatTime(slot.start_time)} – ${formatTime(slot.end_time)} (${formatDuration(
               slot.duration_minutes,
-            )})`}
-            className="absolute inset-x-1 z-10 overflow-hidden rounded-md bg-emerald-500 px-1.5 py-0.5 text-[11px] font-medium text-white dark:bg-emerald-500/90"
+            )}) — click to add an engagement`}
+            className="absolute inset-x-1 z-10 overflow-hidden rounded-md bg-emerald-500 px-1.5 py-0.5 text-left text-[11px] font-medium text-white transition hover:bg-emerald-600 dark:bg-emerald-500/90 dark:hover:bg-emerald-500"
             style={{ top: `${topPct}%`, height: `${heightPct}%` }}
           >
             {heightPct > 3 && <span className="truncate">{formatDuration(slot.duration_minutes)}</span>}
-          </div>
+          </button>
         ))}
 
         {busyBlocks.map(({ item: engagement, topPct, heightPct, col, cols }) => {
@@ -928,10 +1024,15 @@ function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots
           // 30min) meetings, or title-only when there's no room for either.
           const blockPx = (heightPct / 100) * GRID_HEIGHT_PX;
           return (
-            <div
+            <button
               key={engagement.id}
-              title={`${engagement.title} — ${CATEGORY_LABELS[engagement.category]} (${timeRange})`}
-              className={`absolute z-20 overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] font-medium text-white ${CATEGORY_BLOCK_CLASSES[engagement.category]}`}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onEngagementClick?.(engagement);
+              }}
+              title={`${engagement.title} — ${CATEGORY_LABELS[engagement.category]} (${timeRange}) — click to edit`}
+              className={`absolute z-20 overflow-hidden rounded-md px-1.5 py-0.5 text-left text-[11px] font-medium text-white transition hover:brightness-110 ${CATEGORY_BLOCK_CLASSES[engagement.category]}`}
               style={{
                 top: `${topPct}%`,
                 height: `${heightPct}%`,
@@ -950,7 +1051,7 @@ function DayColumn({ day, dayStartMinutes, dayEndMinutes, engagements, freeSlots
                   {blockPx >= 14 && <span className="text-white/80"> · {timeRange}</span>}
                 </span>
               )}
-            </div>
+            </button>
           );
         })}
 

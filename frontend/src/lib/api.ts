@@ -90,6 +90,13 @@ export function createEngagement(data: EngagementInput): Promise<Engagement> {
   });
 }
 
+export function updateEngagement(id: string, data: EngagementInput): Promise<Engagement> {
+  return request<Engagement>(`/engagements/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 export function deleteEngagement(id: string): Promise<void> {
   return request<void>(`/engagements/${id}`, { method: "DELETE" });
 }
