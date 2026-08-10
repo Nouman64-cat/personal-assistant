@@ -197,6 +197,15 @@ TOOLS = [
                 "calendar (e.g. 'do I have anything today', 'what's my schedule tomorrow') and to "
                 "resolve references like 'that meeting' or 'the interview tomorrow' before an "
                 "update/delete. Never guess an id.\n\n"
+                "For 'what's my next/most upcoming engagement' — set start_after to the reference "
+                "datetime (now), leave descending false, and limit to 1; the earliest match at or "
+                "after now is the soonest one. For 'what's my most recent/last engagement' (the most "
+                "recently PAST one) — set start_before to the reference datetime, descending true, "
+                "and limit to 1; without descending true you'd get the oldest engagement in history "
+                "instead of the latest past one. Never answer either question from an engagement "
+                "already mentioned earlier in this conversation — always issue this exact fresh call, "
+                "since 'next' and 'most recent' are relative to the current moment, not to whatever "
+                "was last discussed.\n\n"
                 "Call this fresh every time, even if this same conversation already listed "
                 "engagements earlier — the user can add, edit, or delete things outside this chat "
                 "(directly in the app) between messages, so an earlier tool result in this "
@@ -231,6 +240,15 @@ TOOLS = [
                         "description": "ISO-8601 timestamp, inclusive upper bound on start_time.",
                     },
                     "limit": {"type": "integer"},
+                    "descending": {
+                        "type": "boolean",
+                        "description": (
+                            "False (default) returns the earliest matches first — use for 'next/"
+                            "upcoming' queries. True returns the latest matches first — use for "
+                            "'most recent/last' queries, otherwise limit would keep the oldest "
+                            "results instead of the newest."
+                        ),
+                    },
                 },
                 "required": [],
             },
@@ -458,10 +476,21 @@ def _parse_uuid(value: object) -> Optional[UUID]:
 
 
 def _parse_optional_datetime(value: object) -> Optional[datetime]:
+    """Parse a tool-supplied ISO timestamp for a `list_engagements` bound.
+
+    Normalized through `to_naive_utc` for the same reason create/update
+    payloads are: `Engagement.start_time` is stored naive UTC, and SQLite
+    compares datetimes as text — an offset-aware value (e.g. the model's own
+    local-zone reference datetime, "...+05:00") sorts wrong against those
+    naive strings unless it's stripped to plain UTC first. Left aware, a
+    query like "everything after now" can silently drop rows that are
+    genuinely after now, because their naive UTC text sorts lower than the
+    offset-bearing bound's text.
+    """
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value))
+        return to_naive_utc(datetime.fromisoformat(str(value)))
     except ValueError:
         return None
 
@@ -803,6 +832,7 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 start_after=_parse_optional_datetime(args.get("start_after")),
                 start_before=_parse_optional_datetime(args.get("start_before")),
                 limit=min(int(args.get("limit") or 10), 50),
+                descending=bool(args.get("descending", False)),
             )
             return {
                 "status": "ok",

@@ -124,6 +124,7 @@ def list_engagements(
     start_after: Optional[datetime] = None,
     start_before: Optional[datetime] = None,
     limit: int = 20,
+    descending: bool = False,
 ) -> List[Engagement]:
     query = select(Engagement)
     if title_contains:
@@ -132,5 +133,6 @@ def list_engagements(
         query = query.where(Engagement.start_time >= start_after)
     if start_before is not None:
         query = query.where(Engagement.start_time <= start_before)
-    query = query.order_by(Engagement.start_time).limit(limit)
+    order = Engagement.start_time.desc() if descending else Engagement.start_time
+    query = query.order_by(order).limit(limit)
     return list(session.exec(query).all())
