@@ -194,14 +194,20 @@ export default function EngagementFormModal({
             />
           </div>
 
-          <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+          <label className="flex items-start gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
             <input
               type="checkbox"
               checked={isBlocking}
               onChange={(event) => setIsBlocking(event.target.checked)}
-              className="h-3.5 w-3.5 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600"
+              className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600"
             />
-            Blocks free time
+            <span>
+              Counts as busy time
+              <span className="mt-0.5 block font-normal text-zinc-400 dark:text-zinc-500">
+                Shows on the calendar and blocks this slot from free-time search. Uncheck for a reminder that
+                shouldn&apos;t reserve the time.
+              </span>
+            </span>
           </label>
 
           {error && (

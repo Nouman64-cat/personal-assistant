@@ -205,8 +205,11 @@ export default function EngagementList({
               {CATEGORY_LABELS[engagement.category]}
             </span>
             {!engagement.is_blocking && (
-              <span className="rounded-full bg-zinc-500/15 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-                Non-blocking
+              <span
+                title="Doesn't show on the calendar or block free-time search"
+                className="rounded-full bg-zinc-500/15 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400"
+              >
+                Reminder only
               </span>
             )}
             {isHappeningNow && (
