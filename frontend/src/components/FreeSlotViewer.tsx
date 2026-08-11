@@ -582,7 +582,9 @@ function formatCategoryBreakdown(categoryCounts: Map<EngagementCategory, number>
 
 /** Native `title` text for a month-grid cell — a text-based fallback for anyone not reading the dots/meter by color. */
 function buildDayTooltip(day: Date, summary: DaySummary | undefined, freeFraction: number): string {
-  if (!summary) return formatDayLabel(day);
+  const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+  const label = isWeekend ? `${formatDayLabel(day)} (weekend — off)` : formatDayLabel(day);
+  if (!summary) return label;
   const breakdown = formatCategoryBreakdown(summary.categoryCounts);
   const freeText =
     summary.freeMinutes === 0 && summary.engagementCount > 0
@@ -594,7 +596,7 @@ function buildDayTooltip(day: Date, summary: DaySummary | undefined, freeFractio
           : null;
   const busyText = summary.busyMinutes > 0 ? `${formatDuration(summary.busyMinutes)} busy` : null;
   const detail = [breakdown, freeText, busyText].filter(Boolean).join(" • ") || "No events";
-  return `${formatDayLabel(day)}\n${detail}`;
+  return `${label}\n${detail}`;
 }
 
 /** Compact numeric hour label for tight grid cells, e.g. 405min -> "6.8h", 180min -> "3h", 0 -> "0h". */
@@ -645,6 +647,7 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
           const inCurrentMonth = day.getMonth() === monthCursor.getMonth();
           const isToday = dateKey === todayDateKey;
           const summary = daySummaries.get(dateKey);
+          const isWeekend = day.getDay() === 0 || day.getDay() === 6;
           const hasMeeting =
             summary?.categories.has("meeting") || summary?.categories.has("interview") || false;
           const hasOfficeHours =
@@ -668,6 +671,11 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
                 inCurrentMonth
                   ? "border-zinc-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/5"
                   : "cursor-default border-transparent bg-transparent",
+                // Non-working day (weekend) — a muted tint that yields to the
+                // stronger open/booked tints below when both apply, since
+                // free/busy is the more useful signal at a glance. Engagement
+                // creation is unaffected; this is purely informational.
+                inCurrentMonth && isWeekend && "bg-zinc-50/80 dark:bg-zinc-800/30",
                 inCurrentMonth &&
                   isFullyOpen &&
                   "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-500/5",
@@ -677,13 +685,20 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
                 isToday && "ring-2 ring-inset ring-emerald-500",
               )}
             >
-              <span
-                className={cn(
-                  "text-xs font-medium",
-                  inCurrentMonth ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-300 dark:text-zinc-700",
+              <span className="flex items-baseline gap-1">
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    inCurrentMonth ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-300 dark:text-zinc-700",
+                  )}
+                >
+                  {day.getDate()}
+                </span>
+                {inCurrentMonth && isWeekend && (
+                  <span className="text-[8px] font-semibold uppercase tracking-wide text-amber-500/90 dark:text-amber-400/80">
+                    Off
+                  </span>
                 )}
-              >
-                {day.getDate()}
               </span>
 
               {inCurrentMonth && summary && summary.engagementCount > 1 && (
@@ -971,11 +986,17 @@ function DayColumn({
 
   const isToday = toDateKey(day) === toDateKey(new Date());
   const nowTopPct = isToday ? (minutesSinceMidnight(new Date()) / (24 * 60)) * 100 : null;
+  const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
   return (
     <div className="relative min-w-0 flex-1 border-l border-zinc-200 first:border-l-0 dark:border-zinc-700">
       <div className="sticky top-0 z-10 h-12 border-b border-zinc-200 bg-zinc-50 px-2 py-2 text-center dark:border-zinc-700 dark:bg-zinc-800/60">
         <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{formatDayLabel(day)}</span>
+        {isWeekend && (
+          <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+            Weekend
+          </span>
+        )}
       </div>
 
       <div

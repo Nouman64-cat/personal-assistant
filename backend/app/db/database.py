@@ -28,6 +28,11 @@ def _run_lightweight_migrations() -> None:
             conn.execute(text("ALTER TABLE shiftsettings ADD COLUMN buffer_minutes INTEGER NOT NULL DEFAULT 10"))
             conn.commit()
 
+        chat_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(chatmessage)"))}
+        if chat_columns and "looked_up_engagements_json" not in chat_columns:
+            conn.execute(text("ALTER TABLE chatmessage ADD COLUMN looked_up_engagements_json VARCHAR"))
+            conn.commit()
+
 
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:

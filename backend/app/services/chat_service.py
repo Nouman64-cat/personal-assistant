@@ -15,7 +15,13 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.time_utils import to_naive_utc
 from app.db.models import ChatMessage, ChatRole, ChatSession, Engagement, EngagementCategory
-from app.schemas.chat import BusyEngagementInfo, ConflictInfo, EngagementAction, EngagementActionType
+from app.schemas.chat import (
+    BusyEngagementInfo,
+    ConflictInfo,
+    EngagementAction,
+    EngagementActionType,
+    LookedUpEngagement,
+)
 from app.schemas.engagement import EngagementCreate, EngagementRead, EngagementUpdate
 from app.schemas.schedule import FreeSlotItem
 from app.services import engagement_service
@@ -46,6 +52,7 @@ class ChatTurnResult:
     free_slots: List[FreeSlotItem] = field(default_factory=list)
     busy_engagements: List[BusyEngagementInfo] = field(default_factory=list)
     conflict: Optional[ConflictInfo] = None
+    looked_up_engagements: List[LookedUpEngagement] = field(default_factory=list)
 
 
 TOOLS = [
@@ -616,7 +623,14 @@ def _localize_engagement(engagement_dump: dict, tzinfo: ZoneInfo) -> dict:
     return engagement_dump
 
 
-ToolResult = Tuple[dict, Optional[EngagementAction], List[FreeSlotItem], List[BusyEngagementInfo], Optional[ConflictInfo]]
+ToolResult = Tuple[
+    dict,
+    Optional[EngagementAction],
+    List[FreeSlotItem],
+    List[BusyEngagementInfo],
+    Optional[ConflictInfo],
+    List[LookedUpEngagement],
+]
 
 
 def _fetch_day_schedule(
@@ -659,7 +673,7 @@ def _build_conflict_result(session: Session, exc: EngagementConflictError, tzinf
     attempted_start_utc = exc.attempted_start
     attempted_end_utc = exc.attempted_end
     if attempted_title is None or attempted_start_utc is None or attempted_end_utc is None:
-        return {"status": "error", "message": str(exc)}, None, [], [], None
+        return {"status": "error", "message": str(exc)}, None, [], [], None, []
 
     local_day = attempted_start_utc.replace(tzinfo=timezone.utc).astimezone(tzinfo).date()
     free_slots, busy_engagements = _fetch_day_schedule(session, local_day, tzinfo)
@@ -693,7 +707,7 @@ def _build_conflict_result(session: Session, exc: EngagementConflictError, tzinf
         "message": message,
         "free_slots_that_day": [item.model_dump(mode="json") for item in free_slots],
     }
-    return result, None, free_slots, busy_engagements, conflict_info
+    return result, None, free_slots, busy_engagements, conflict_info, []
 
 
 def _build_availability_result(
@@ -713,7 +727,7 @@ def _build_availability_result(
         conflicting_with=None,
     )
     result = {"status": "ok", "available": True}
-    return result, None, free_slots, busy_engagements, availability_info
+    return result, None, free_slots, busy_engagements, availability_info, []
 
 
 def _apply_weekday_args(
@@ -748,7 +762,7 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
     try:
         args = json.loads(tool_call.function.arguments or "{}")
     except json.JSONDecodeError as exc:
-        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None, [], [], None
+        return {"status": "error", "message": f"Malformed arguments: {exc}"}, None, [], [], None, []
 
     try:
         if name == "create_engagement":
@@ -774,12 +788,12 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 engagement=EngagementRead.model_validate(engagement),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, [], [], None
+            return result, action, [], [], None, []
 
         if name == "update_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], [], None
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], [], None, []
             event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
             update_fields = {
                 k: v for k, v in args.items()
@@ -811,19 +825,19 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 engagement=EngagementRead.model_validate(engagement),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, [], [], None
+            return result, action, [], [], None, []
 
         if name == "delete_engagement":
             engagement_id = _parse_uuid(args.get("engagement_id"))
             if engagement_id is None:
-                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], [], None
+                return {"status": "error", "message": "engagement_id is missing or not a valid UUID"}, None, [], [], None, []
             snapshot = engagement_service.delete_engagement(session, engagement_id)
             action = EngagementAction(
                 type=EngagementActionType.DELETED,
                 engagement=EngagementRead.model_validate(snapshot),
             )
             result = {"status": "ok", "engagement": _localize_engagement(action.engagement.model_dump(mode="json"), tzinfo)}
-            return result, action, [], [], None
+            return result, action, [], [], None, []
 
         if name == "list_engagements":
             results = engagement_service.list_engagements(
@@ -834,13 +848,23 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 limit=min(int(args.get("limit") or 10), 50),
                 descending=bool(args.get("descending", False)),
             )
+            looked_up = [
+                LookedUpEngagement(
+                    id=e.id,
+                    title=e.title,
+                    category=e.category,
+                    start_time=_utc_to_local_iso(e.start_time, tzinfo),
+                    end_time=_utc_to_local_iso(e.end_time, tzinfo),
+                )
+                for e in results
+            ]
             return {
                 "status": "ok",
                 "engagements": [
                     _localize_engagement(EngagementRead.model_validate(e).model_dump(mode="json"), tzinfo)
                     for e in results
                 ],
-            }, None, [], [], None
+            }, None, [], [], None, looked_up
 
         if name == "check_free_slots":
             range_result = resolve_free_slots_for_range(
@@ -871,7 +895,7 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
                 "slots": [item.model_dump(mode="json") for item in free_slots],
                 "busy": [item.model_dump(mode="json") for item in busy_engagements],
             }
-            return result, None, free_slots, busy_engagements, None
+            return result, None, free_slots, busy_engagements, None, []
 
         if name == "check_availability":
             event_tzinfo = _resolve_event_timezone(args.get("timezone"), tzinfo)
@@ -884,7 +908,7 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
             start_utc = to_naive_utc(datetime.fromisoformat(start_local))
             end_utc = to_naive_utc(datetime.fromisoformat(end_local))
             if start_utc >= end_utc:
-                return {"status": "error", "message": "start_time must be before end_time"}, None, [], [], None
+                return {"status": "error", "message": "start_time must be before end_time"}, None, [], [], None, []
 
             existing = session.exec(select(Engagement)).all()
             conflict = find_conflicting_engagement(start_utc, end_utc, existing)
@@ -900,12 +924,12 @@ def _execute_tool(session: Session, tool_call, tzinfo: ZoneInfo, reference_datet
             )
             return _build_conflict_result(session, fabricated_exc, tzinfo)
 
-        return {"status": "error", "message": f"Unknown tool {name!r}"}, None, [], [], None
+        return {"status": "error", "message": f"Unknown tool {name!r}"}, None, [], [], None, []
 
     except (EngagementNotFoundError, EngagementConflictError) as exc:
-        return {"status": "error", "message": str(exc)}, None, [], [], None
+        return {"status": "error", "message": str(exc)}, None, [], [], None, []
     except (ValidationError, ValueError, KeyError, TypeError) as exc:
-        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None, [], [], None
+        return {"status": "error", "message": f"Invalid arguments: {exc}"}, None, [], [], None, []
 
 
 def send_message(
@@ -944,6 +968,7 @@ def send_message(
     free_slots: List[FreeSlotItem] = []
     busy_engagements: List[BusyEngagementInfo] = []
     conflict: Optional[ConflictInfo] = None
+    looked_up_engagements: List[LookedUpEngagement] = []
 
     for _ in range(settings.CHAT_MAX_TOOL_ROUNDTRIPS):
         messages_for_api = [system_message] + _replay_messages(session, chat_session.id)
@@ -1004,7 +1029,7 @@ def send_message(
             session.commit()
 
             for tool_call in message.tool_calls:
-                result, action, slots, busy, tool_conflict = _execute_tool(
+                result, action, slots, busy, tool_conflict, looked_up = _execute_tool(
                     session, tool_call, tzinfo, reference_datetime
                 )
                 if action is not None:
@@ -1015,6 +1040,8 @@ def send_message(
                     busy_engagements.extend(busy)
                 if tool_conflict is not None:
                     conflict = tool_conflict
+                if looked_up:
+                    looked_up_engagements.extend(looked_up)
                 session.add(
                     ChatMessage(
                         session_id=chat_session.id,
@@ -1039,6 +1066,9 @@ def send_message(
                 busy_engagements_json=json.dumps(
                     [engagement.model_dump(mode="json") for engagement in busy_engagements]
                 ),
+                looked_up_engagements_json=json.dumps(
+                    [engagement.model_dump(mode="json") for engagement in looked_up_engagements]
+                ),
             )
         )
         session.commit()
@@ -1050,6 +1080,7 @@ def send_message(
             free_slots=free_slots,
             busy_engagements=busy_engagements,
             conflict=conflict,
+            looked_up_engagements=looked_up_engagements,
         )
 
     raise ChatServiceError(

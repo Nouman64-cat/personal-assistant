@@ -3,11 +3,19 @@ import { AlertTriangle, ArrowRight, CheckCircle2 } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { BusyEngagementInfo, ConflictInfo, EngagementAction, FreeSlotItem, ShiftSettings } from "@/lib/types";
+import type {
+  BusyEngagementInfo,
+  ConflictInfo,
+  EngagementAction,
+  FreeSlotItem,
+  LookedUpEngagement,
+  ShiftSettings,
+} from "@/lib/types";
 import { cn, formatClockTime } from "@/lib/utils";
 
 import EngagementActionCard from "./EngagementActionCard";
 import FreeSlotsCard from "./FreeSlotsCard";
+import LookedUpEngagementsCard from "./LookedUpEngagementsCard";
 
 interface ChatMessageBubbleProps {
   role: "user" | "assistant";
@@ -20,6 +28,10 @@ interface ChatMessageBubbleProps {
    * banner (amber for a conflict, green for confirmed-available) and
    * highlights the checked window in the free-slots widget below. */
   conflict?: ConflictInfo | null;
+  /** Engagement(s) a list_engagements lookup surfaced this turn (e.g. "what's
+   * my next meeting") — rendered as a card instead of leaving the answer as
+   * prose only. */
+  lookedUpEngagements?: LookedUpEngagement[];
   /** Needed to bound the free-slots timeline bar to the shift window; the
    * widget just doesn't render until the shift has loaded. */
   shift?: ShiftSettings | null;
@@ -55,6 +67,7 @@ export default function ChatMessageBubble({
   freeSlots = [],
   busyEngagements = [],
   conflict = null,
+  lookedUpEngagements = [],
   shift = null,
 }: ChatMessageBubbleProps) {
   const isUser = role === "user";
@@ -101,6 +114,7 @@ export default function ChatMessageBubble({
               </span>
             </div>
           ))}
+        {lookedUpEngagements.length > 0 && <LookedUpEngagementsCard engagements={lookedUpEngagements} />}
         {freeSlots.length > 0 && shift && (
           <FreeSlotsCard
             slots={freeSlots}

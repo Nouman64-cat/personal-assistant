@@ -67,6 +67,7 @@ class ChatMessage(SQLModel, table=True):
     actions_json: Optional[str] = Field(default=None)
     free_slots_json: Optional[str] = Field(default=None)
     busy_engagements_json: Optional[str] = Field(default=None)
+    looked_up_engagements_json: Optional[str] = Field(default=None)
     created_at: datetime = Field(
         default_factory=datetime.utcnow, sa_column=Column(DateTime, index=True)
     )

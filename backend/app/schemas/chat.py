@@ -34,6 +34,16 @@ class BusyEngagementInfo(BaseModel):
     end_time: datetime
 
 
+class LookedUpEngagement(BusyEngagementInfo):
+    """A single engagement returned by a list_engagements lookup — e.g.
+    answering "what's my next engagement" — rendered as a small card next to
+    the reply instead of leaving the user with prose alone. Same local-
+    timezone-preserving shape as BusyEngagementInfo (see its docstring for
+    why that's not EngagementRead), plus the id for a stable React key."""
+
+    id: UUID
+
+
 class ConflictInfo(BaseModel):
     """The result of checking a specific time window against the calendar —
     either because create_engagement/update_engagement hit a conflict, or
@@ -76,6 +86,9 @@ class ChatMessageResponse(BaseModel):
     # of just showing "Busy".
     busy_engagements: List[BusyEngagementInfo] = Field(default_factory=list)
     conflict: Optional[ConflictInfo] = None
+    # Engagement(s) a list_engagements lookup actually surfaced (e.g. "what's
+    # my next engagement") — rendered as a card so the answer isn't prose-only.
+    looked_up_engagements: List[LookedUpEngagement] = Field(default_factory=list)
 
 
 class ChatHistoryMessage(BaseModel):
@@ -85,6 +98,7 @@ class ChatHistoryMessage(BaseModel):
     actions: List[EngagementAction] = Field(default_factory=list)
     free_slots: List[FreeSlotItem] = Field(default_factory=list)
     busy_engagements: List[BusyEngagementInfo] = Field(default_factory=list)
+    looked_up_engagements: List[LookedUpEngagement] = Field(default_factory=list)
 
 
 class ChatHistoryResponse(BaseModel):

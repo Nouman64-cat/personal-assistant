@@ -64,6 +64,14 @@ export interface ChatMessageResponse {
    * turn's response, not replayed with chat history.
    */
   conflict?: ConflictInfo | null;
+  /** Engagement(s) a list_engagements lookup actually surfaced (e.g. "what's
+   * my next engagement") — same offset-aware-local convention as
+   * busy_engagements, rendered as a card so the answer isn't prose-only. */
+  looked_up_engagements: LookedUpEngagement[];
+}
+
+export interface LookedUpEngagement extends BusyEngagementInfo {
+  id: string;
 }
 
 export interface ConflictInfo {
@@ -81,6 +89,7 @@ export interface ChatHistoryMessageDto {
   actions: EngagementAction[];
   free_slots: FreeSlotItem[];
   busy_engagements: BusyEngagementInfo[];
+  looked_up_engagements: LookedUpEngagement[];
 }
 
 export interface BusyEngagementInfo {
