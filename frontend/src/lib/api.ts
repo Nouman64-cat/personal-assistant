@@ -146,14 +146,20 @@ export async function transcribeVoice(audioBlob: Blob): Promise<string> {
   return data.text;
 }
 
-/** Synthesizes `text` with gpt-4o-mini-tts and returns the MP3 audio. */
-export async function speakText(text: string): Promise<Blob> {
-  const response = await rawRequest("/chat/voice/speak", {
+/**
+ * Opens a streamed gpt-4o-mini-tts synthesis of `text` and returns the raw
+ * `Response` — the backend starts forwarding mp3 bytes as OpenAI produces
+ * them, so the caller can start playback (via MediaSource, see
+ * useWakeWordVoice) well before the full clip has finished generating.
+ * Awaiting `.blob()` here would defeat that by buffering the whole stream
+ * before resolving.
+ */
+export function openSpeechStream(text: string): Promise<Response> {
+  return rawRequest("/chat/voice/speak", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
-  return response.blob();
 }
 
 // --- Availability ------------------------------------------------------------

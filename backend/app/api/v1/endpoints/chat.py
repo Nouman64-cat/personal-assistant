@@ -2,7 +2,7 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.db.database import get_session
@@ -86,9 +86,9 @@ async def transcribe_voice(audio: UploadFile = File(...)) -> VoiceTranscribeResp
 
 
 @router.post("/voice/speak")
-def speak_text(payload: VoiceSpeakRequest) -> Response:
+def speak_text(payload: VoiceSpeakRequest) -> StreamingResponse:
     try:
-        audio_bytes = voice_service.synthesize_speech(payload.text)
+        chunks = voice_service.open_speech_stream(payload.text)
     except ChatServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    return Response(content=audio_bytes, media_type="audio/mpeg")
+    return StreamingResponse(chunks, media_type="audio/mpeg")
