@@ -54,13 +54,15 @@ async function extractErrorDetail(response: Response): Promise<string> {
   return response.statusText || `Request failed with status ${response.status}`;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** Shared fetch + connectivity/status handling. Returns the raw `Response`
+ * so callers can parse JSON, a Blob (audio), or nothing, as appropriate —
+ * `request` below is the common JSON-in/JSON-out case built on top of it. */
+async function rawRequest(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(`${API_V1_URL}${path}`, {
       ...init,
       headers: {
-        "Content-Type": "application/json",
         "ngrok-skip-browser-warning": "true",
         ...init?.headers,
       },
@@ -77,6 +79,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     throw new ApiError(await extractErrorDetail(response), response.status);
   }
+
+  return response;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await rawRequest(path, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
 
   if (response.status === 204) {
     return undefined as T;
@@ -120,6 +131,29 @@ export function sendChatMessage(payload: ChatMessageRequest): Promise<ChatMessag
 
 export function getChatHistory(sessionId: string): Promise<ChatHistoryResponse> {
   return request<ChatHistoryResponse>(`/chat/${sessionId}/messages`);
+}
+
+// --- Voice ---------------------------------------------------------------
+
+/** Sends a recorded command clip to gpt-4o-mini-transcribe and returns the transcript. */
+export async function transcribeVoice(audioBlob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "command.webm");
+  // No Content-Type header here — the browser sets the multipart boundary
+  // itself when the body is a FormData; setting it manually breaks the parse.
+  const response = await rawRequest("/chat/voice/transcribe", { method: "POST", body: formData });
+  const data = (await response.json()) as { text: string };
+  return data.text;
+}
+
+/** Synthesizes `text` with gpt-4o-mini-tts and returns the MP3 audio. */
+export async function speakText(text: string): Promise<Blob> {
+  const response = await rawRequest("/chat/voice/speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  return response.blob();
 }
 
 // --- Availability ------------------------------------------------------------

@@ -1,13 +1,21 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from sqlmodel import Session
 
 from app.db.database import get_session
 from app.db.models import ChatRole
-from app.schemas.chat import ChatHistoryMessage, ChatHistoryResponse, ChatMessageRequest, ChatMessageResponse
-from app.services import chat_service
+from app.schemas.chat import (
+    ChatHistoryMessage,
+    ChatHistoryResponse,
+    ChatMessageRequest,
+    ChatMessageResponse,
+    VoiceSpeakRequest,
+    VoiceTranscribeResponse,
+)
+from app.services import chat_service, voice_service
 from app.services.chat_service import ChatServiceError
 
 router = APIRouter()
@@ -63,3 +71,24 @@ def get_messages(session_id: UUID, session: Session = Depends(get_session)) -> C
             for row in rows
         ],
     )
+
+
+@router.post("/voice/transcribe", response_model=VoiceTranscribeResponse)
+async def transcribe_voice(audio: UploadFile = File(...)) -> VoiceTranscribeResponse:
+    audio_bytes = await audio.read()
+    try:
+        text = voice_service.transcribe_audio(
+            audio_bytes, audio.filename or "audio.webm", audio.content_type or "audio/webm"
+        )
+    except ChatServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return VoiceTranscribeResponse(text=text)
+
+
+@router.post("/voice/speak")
+def speak_text(payload: VoiceSpeakRequest) -> Response:
+    try:
+        audio_bytes = voice_service.synthesize_speech(payload.text)
+    except ChatServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return Response(content=audio_bytes, media_type="audio/mpeg")

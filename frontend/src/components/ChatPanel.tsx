@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2, MessageSquarePlus, Mic, MicOff, Send, Sparkles, Volume2 } from "lucide-react";
 
+import { useWakeWordVoice, type VoiceStatus } from "@/hooks/useWakeWordVoice";
 import { ApiError, getChatHistory, sendChatMessage } from "@/lib/api";
 import { useAppState } from "@/lib/appState";
 import type { BusyEngagementInfo, ConflictInfo, EngagementAction, FreeSlotItem, LookedUpEngagement } from "@/lib/types";
@@ -18,6 +19,22 @@ const SUGGESTED_PROMPTS = [
   "Am I available Friday at 2pm EST?",
   "Move my 4pm to 5pm",
 ];
+
+const VOICE_STATUS_LABELS: Record<VoiceStatus, string> = {
+  idle: "Off",
+  listening: 'Listening for "Bella"',
+  recording: "Recording your command…",
+  processing: "Thinking…",
+  speaking: "Speaking…",
+};
+
+const VOICE_STATUS_CLASSES: Record<VoiceStatus, string> = {
+  idle: "text-zinc-500 dark:text-zinc-400",
+  listening: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
+  recording: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+  processing: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  speaking: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+};
 
 const WEEKDAY_AUTO_SELECT_MS = 4500;
 /** Index 0 = Sunday, matching `Date.getDay()`. */
@@ -206,12 +223,12 @@ export default function ChatPanel() {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isSending]);
 
-  async function handleSend() {
-    const trimmed = input.trim();
-    if (!trimmed || isSending) return;
-
+  // Shared by the textarea's send button and the "Bella" voice loop below —
+  // runs one full chat turn and resolves with the reply text, so the voice
+  // hook can speak it back without duplicating any of the session/actions
+  // bookkeeping.
+  async function sendTurn(trimmed: string): Promise<string> {
     setMessages((previous) => [...previous, { role: "user", content: trimmed }]);
-    setInput("");
     setIsSending(true);
     setError(null);
 
@@ -238,10 +255,26 @@ export default function ChatPanel() {
         },
       ]);
       if (response.actions.length > 0) triggerRefresh();
+      return response.reply;
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Something went wrong sending that message.");
+      const message = caught instanceof ApiError ? caught.message : "Something went wrong sending that message.";
+      setError(message);
+      throw new Error(message);
     } finally {
       setIsSending(false);
+    }
+  }
+
+  const voice = useWakeWordVoice({ onCommand: sendTurn });
+
+  async function handleSend() {
+    const trimmed = input.trim();
+    if (!trimmed || isSending) return;
+    setInput("");
+    try {
+      await sendTurn(trimmed);
+    } catch {
+      // Already surfaced via setError inside sendTurn.
     }
   }
 
@@ -262,21 +295,74 @@ export default function ChatPanel() {
               <Sparkles className="h-4.5 w-4.5" />
             </span>
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Chat</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Chat</h2>
+                {voice.enabled && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                      VOICE_STATUS_CLASSES[voice.status],
+                    )}
+                  >
+                    {VOICE_STATUS_LABELS[voice.status]}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Tell it what to schedule, move, or cancel — it remembers this conversation.
+                {voice.enabled
+                  ? 'Say "Bella" any time to give a hands-free command.'
+                  : "Tell it what to schedule, move, or cancel — it remembers this conversation."}
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleNewChat}
-            disabled={messages.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            <MessageSquarePlus className="h-3.5 w-3.5" />
-            New Chat
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={voice.toggle}
+              disabled={!voice.supported}
+              title={
+                !voice.supported
+                  ? "Voice isn't supported in this browser — try Chrome or Edge"
+                  : voice.enabled
+                    ? 'Turn off the "Bella" voice assistant'
+                    : 'Turn on the "Bella" voice assistant'
+              }
+              aria-pressed={voice.enabled}
+              className={cn(
+                "relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40",
+                voice.enabled
+                  ? VOICE_STATUS_CLASSES[voice.status]
+                  : "text-zinc-500 hover:bg-white hover:shadow-sm dark:text-zinc-400 dark:hover:bg-zinc-800",
+              )}
+            >
+              {voice.enabled && (voice.status === "listening" || voice.status === "recording") && (
+                <span
+                  className={cn(
+                    "absolute inset-0 animate-ping rounded-lg opacity-40",
+                    voice.status === "recording" ? "bg-red-400" : "bg-violet-400",
+                  )}
+                />
+              )}
+              {voice.status === "processing" ? (
+                <Loader2 className="relative h-4 w-4 animate-spin" />
+              ) : voice.status === "speaking" ? (
+                <Volume2 className="relative h-4 w-4" />
+              ) : voice.enabled ? (
+                <Mic className="relative h-4 w-4" />
+              ) : (
+                <MicOff className="relative h-4 w-4" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleNewChat}
+              disabled={messages.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+              New Chat
+            </button>
+          </div>
         </div>
       </div>
 
@@ -346,6 +432,12 @@ export default function ChatPanel() {
         <div className="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+      {voice.error && (
+        <div className="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+          <MicOff className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{voice.error}</span>
         </div>
       )}
 

@@ -104,3 +104,11 @@ class ChatHistoryMessage(BaseModel):
 class ChatHistoryResponse(BaseModel):
     session_id: UUID
     messages: List[ChatHistoryMessage]
+
+
+class VoiceTranscribeResponse(BaseModel):
+    text: str
+
+
+class VoiceSpeakRequest(BaseModel):
+    text: str = Field(..., min_length=1)
