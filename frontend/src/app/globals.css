@@ -58,3 +58,34 @@ body {
 .animate-bounce-dot {
   animation: bounce-dot 1.3s ease-in-out infinite;
 }
+
+/* "Bella" voice control: a small equalizer used while she's recording your
+   command or speaking a reply, so the header control reads as alive rather
+   than a static icon. */
+@keyframes voice-bar {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.animate-voice-bar {
+  animation: voice-bar 0.9s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes voice-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-voice-pop-in {
+  animation: voice-pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}

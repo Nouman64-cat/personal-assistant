@@ -28,6 +28,10 @@ interface UseWakeWordVoiceResult {
   status: VoiceStatus;
   error: string | null;
   toggle: () => void;
+  /** What Bella heard on the most recent command — for a live-caption UI. Cleared at the start of the next recording. */
+  lastHeard: string | null;
+  /** The short spoken line Bella replied with on the most recent turn — for a live-caption UI. Cleared at the start of the next recording. */
+  lastSpoken: string | null;
 }
 
 function getSpeechRecognitionCtor(): (new () => SpeechRecognition) | null {
@@ -163,6 +167,8 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
   const [enabled, setEnabled] = useState(false);
   const [status, setStatus] = useState<VoiceStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [lastHeard, setLastHeard] = useState<string | null>(null);
+  const [lastSpoken, setLastSpoken] = useState<string | null>(null);
   // Starts false to match the server-rendered markup (no `window` there),
   // then flips true post-mount if the browser actually has these APIs —
   // computing this inline from `window`/`navigator` during render would
@@ -314,6 +320,8 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
   async function beginRecording() {
     if (stoppedRef.current) return;
     setStatus("recording");
+    setLastHeard(null);
+    setLastSpoken(null);
     try {
       let stream = streamRef.current;
       // Re-acquire if the warm stream never got set up (prepareMicStream
@@ -402,7 +410,9 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     try {
       const text = (await transcribeVoice(blob)).trim();
       if (!text) return;
+      setLastHeard(text);
       const reply = await onCommandRef.current(text);
+      setLastSpoken(reply);
       await speak(reply);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong with that voice command.");
@@ -434,6 +444,10 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
       stopAll();
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("idle");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLastHeard(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLastSpoken(null);
     }
     return () => {
       stopAll();
@@ -446,5 +460,5 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     setEnabled((previous) => !previous);
   }, []);
 
-  return { supported, enabled, status, error, toggle };
+  return { supported, enabled, status, error, toggle, lastHeard, lastSpoken };
 }
