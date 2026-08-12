@@ -10,7 +10,7 @@ import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_OPTIONS } from '@/constants/
 import { Spacing } from '@/constants/theme';
 import { ApiError, createEngagement, deleteEngagement, updateEngagement } from '@/lib/api';
 import { formatClockTime, formatDayLabel } from '@/lib/dates';
-import type { Engagement, EngagementCategory } from '@/lib/types';
+import type { EngagementCategory } from '@/lib/types';
 import { useTheme } from '@/hooks/use-theme';
 
 interface EngagementFormModalProps {

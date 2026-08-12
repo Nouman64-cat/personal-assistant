@@ -59,6 +59,7 @@ export default function CalendarScreen() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadEngagements();
   }, [loadEngagements]);
 
@@ -89,6 +90,7 @@ export default function CalendarScreen() {
   }, [shift, selectedDate]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadFreeSlots();
   }, [loadFreeSlots]);
 

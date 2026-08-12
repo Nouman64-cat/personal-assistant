@@ -1,3 +1,4 @@
+import type { Href } from 'expo-router';
 import { Tabs, TabList, TabTrigger, TabSlot, TabTriggerSlotProps, TabListProps } from 'expo-router/ui';
 import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
 
@@ -7,7 +8,7 @@ import { ThemedView } from './themed-view';
 
 import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
 
-const TABS: { name: string; href: string; label: string; icon: IconName }[] = [
+const TABS: { name: string; href: Href; label: string; icon: IconName }[] = [
   { name: 'index', href: '/', label: 'Calendar', icon: 'calendar' },
   { name: 'engagements', href: '/engagements', label: 'Engagements', icon: 'engagements' },
   { name: 'chat', href: '/chat', label: 'Chat', icon: 'chat' },

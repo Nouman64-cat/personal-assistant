@@ -1,4 +1,4 @@
-import axios, { AxiosError, type AxiosInstance } from 'axios';
+import { create as createAxiosInstance, type AxiosError, type AxiosInstance } from 'axios';
 
 import { API_BASE_URL } from '@/lib/env';
 import type {
@@ -47,7 +47,7 @@ function extractErrorDetail(error: AxiosError): string {
  * that normalizes every failure into an `ApiError`, instead of each screen
  * reaching for its own axios.get/post and re-deriving error handling.
  */
-export const apiClient: AxiosInstance = axios.create({
+export const apiClient: AxiosInstance = createAxiosInstance({
   baseURL: `${API_BASE_URL}/api/v1`,
   timeout: 20000,
   headers: { 'Content-Type': 'application/json' },
@@ -119,4 +119,33 @@ export async function getShiftSettings(): Promise<ShiftSettings> {
 export async function updateShiftSettings(input: ShiftSettingsInput): Promise<ShiftSettings> {
   const { data } = await apiClient.put<ShiftSettings>('/settings/shift', input);
   return data;
+}
+
+// --- Voice ---------------------------------------------------------------
+
+/**
+ * Uploads a recorded command clip (a local file URI from `expo-audio`'s
+ * recorder) to `gpt-4o-mini-transcribe` and returns the transcript. RN's
+ * `FormData` takes a `{ uri, name, type }` object for file fields — it has
+ * no `Blob` in the DOM sense, hence the cast (the standard, unavoidable
+ * pattern for RN file uploads; DOM's `FormData.append` types don't know
+ * about this shape).
+ */
+export async function transcribeVoiceFile(uri: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('audio', { uri, name: 'command.m4a', type: 'audio/m4a' } as unknown as Blob);
+  const { data } = await apiClient.post<{ text: string }>('/chat/voice/transcribe', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data.text;
+}
+
+/**
+ * Builds the URL for the GET variant of the speak endpoint — `expo-audio`'s
+ * `useAudioPlayer` takes a bare URL (it can't POST a body the way the web
+ * client's `fetch`-based streaming does), so playback goes straight through
+ * this rather than through `apiClient`.
+ */
+export function getSpeakUrl(text: string): string {
+  return `${API_BASE_URL}/api/v1/chat/voice/speak?text=${encodeURIComponent(text)}`;
 }

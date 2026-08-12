@@ -9,7 +9,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { ApiError, getChatHistory, sendChatMessage } from '@/lib/api';
+import type { ChatMessageResponse } from '@/lib/types';
 import { useTheme } from '@/hooks/use-theme';
+import { useVoiceTurn, type VoiceTurnStatus } from '@/hooks/use-voice-turn';
 
 const SESSION_STORAGE_KEY = 'chat_session_id';
 
@@ -18,6 +20,38 @@ const SUGGESTIONS = [
   "What's free this week?",
   'Am I available Friday at 2pm EST?',
 ];
+
+const VOICE_STATUS_LABEL: Record<VoiceTurnStatus, string> = {
+  idle: '',
+  recording: "I'm listening…",
+  processing: 'One moment…',
+  speaking: 'Speaking…',
+};
+
+/** A small live level meter — 4 bars whose height tracks the recorder's metering (dBFS, roughly -60 quiet to 0 loud). */
+function LevelBars({ metering, color }: { metering: number; color: string }) {
+  const level = Math.max(0, Math.min(1, (metering + 60) / 60));
+  return (
+    <View style={styles.levelBars}>
+      {[0.5, 1, 0.75, 0.6].map((weight, index) => (
+        <View
+          key={index}
+          style={[
+            styles.levelBar,
+            { backgroundColor: color, height: 4 + level * weight * 20 },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
+function formatSeconds(millis: number): string {
+  const totalSeconds = Math.floor(millis / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
 
 export default function ChatScreen() {
   const theme = useTheme();
@@ -79,12 +113,12 @@ export default function ChatScreen() {
     }
   }, [messages, isSending]);
 
-  async function handleSend(overrideText?: string) {
-    const trimmed = (overrideText ?? input).trim();
-    if (!trimmed || isSending) return;
-
+  // Shared by the text input's send button and the voice turn below — runs
+  // one full chat turn and resolves with the full response, so voice can
+  // both append the on-screen bubble AND build a spoken-friendly line from
+  // the same structured data (see buildSpokenReply).
+  async function sendTurn(trimmed: string): Promise<ChatMessageResponse> {
     setMessages((previous) => [...previous, { role: 'user', content: trimmed }]);
-    setInput('');
     setIsSending(true);
     setError(null);
 
@@ -104,10 +138,26 @@ export default function ChatScreen() {
           lookedUpEngagements: response.looked_up_engagements,
         },
       ]);
+      return response;
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Something went wrong sending that message.');
+      const message = caught instanceof ApiError ? caught.message : 'Something went wrong sending that message.';
+      setError(message);
+      throw new Error(message);
     } finally {
       setIsSending(false);
+    }
+  }
+
+  const voice = useVoiceTurn({ onCommand: sendTurn });
+
+  async function handleSend(overrideText?: string) {
+    const trimmed = (overrideText ?? input).trim();
+    if (!trimmed || isSending) return;
+    setInput('');
+    try {
+      await sendTurn(trimmed);
+    } catch {
+      // Already surfaced via the error state.
     }
   }
 
@@ -118,6 +168,10 @@ export default function ChatScreen() {
     setError(null);
   }
 
+  const voiceActive = voice.status !== 'idle';
+  const voiceTone =
+    voice.status === 'recording' ? theme.danger : voice.status === 'speaking' ? theme.success : theme.tint;
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -127,7 +181,7 @@ export default function ChatScreen() {
               Chat
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              Tell it what to schedule, move, or cancel.
+              Tell it what to schedule, move, or cancel — or tap the mic.
             </ThemedText>
           </View>
           <Pressable onPress={handleNewChat} disabled={messages.length === 0} hitSlop={10}>
@@ -191,25 +245,64 @@ export default function ChatScreen() {
               </ThemedText>
             </View>
           )}
+          {voice.error && (
+            <View style={[styles.errorBanner, { backgroundColor: theme.dangerBackground }]}>
+              <ThemedText type="small" style={{ color: theme.danger }}>
+                {voice.error}
+              </ThemedText>
+            </View>
+          )}
 
-          <View style={[styles.inputRow, { borderTopColor: theme.border }]}>
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder="Message the assistant…"
-              placeholderTextColor={theme.textSecondary}
-              editable={!isSending}
-              multiline
-              style={[styles.textInput, { backgroundColor: theme.backgroundElement, color: theme.text }]}
-              onSubmitEditing={() => handleSend()}
-            />
-            <Pressable
-              onPress={() => handleSend()}
-              disabled={isSending || input.trim().length === 0}
-              style={[styles.sendButton, { backgroundColor: theme.tint, opacity: isSending || !input.trim() ? 0.5 : 1 }]}>
-              {isSending ? <ActivityIndicator color="#ffffff" size="small" /> : <Icon name="send" color="#ffffff" size={18} />}
-            </Pressable>
-          </View>
+          {voiceActive ? (
+            <View style={[styles.voiceRow, { borderTopColor: theme.border, backgroundColor: theme.backgroundElement }]}>
+              {voice.status === 'processing' ? (
+                <ActivityIndicator color={theme.tint} size="small" />
+              ) : (
+                <LevelBars metering={voice.status === 'recording' ? voice.metering : 0} color={voiceTone} />
+              )}
+              <View style={styles.voiceLabelStack}>
+                <ThemedText type="smallBold" style={{ color: voiceTone }}>
+                  {VOICE_STATUS_LABEL[voice.status]}
+                </ThemedText>
+                {voice.status === 'recording' && (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {formatSeconds(voice.durationMillis)}
+                  </ThemedText>
+                )}
+              </View>
+              <Pressable
+                onPress={voice.toggle}
+                disabled={voice.status === 'processing'}
+                style={[styles.voiceStopButton, { backgroundColor: voiceTone, opacity: voice.status === 'processing' ? 0.5 : 1 }]}>
+                <Icon name={voice.status === 'recording' ? 'send' : 'close'} color="#ffffff" size={16} />
+              </Pressable>
+            </View>
+          ) : (
+            <View style={[styles.inputRow, { borderTopColor: theme.border }]}>
+              <TextInput
+                value={input}
+                onChangeText={setInput}
+                placeholder="Message the assistant…"
+                placeholderTextColor={theme.textSecondary}
+                editable={!isSending}
+                multiline
+                style={[styles.textInput, { backgroundColor: theme.backgroundElement, color: theme.text }]}
+                onSubmitEditing={() => handleSend()}
+              />
+              <Pressable
+                onPress={voice.toggle}
+                disabled={isSending}
+                style={[styles.micButton, { backgroundColor: theme.backgroundElement, opacity: isSending ? 0.5 : 1 }]}>
+                <Icon name="mic" color={theme.tint} size={18} />
+              </Pressable>
+              <Pressable
+                onPress={() => handleSend()}
+                disabled={isSending || input.trim().length === 0}
+                style={[styles.sendButton, { backgroundColor: theme.tint, opacity: isSending || !input.trim() ? 0.5 : 1 }]}>
+                {isSending ? <ActivityIndicator color="#ffffff" size="small" /> : <Icon name="send" color="#ffffff" size={18} />}
+              </Pressable>
+            </View>
+          )}
         </KeyboardAvoidingView>
       </SafeAreaView>
     </ThemedView>
@@ -304,11 +397,48 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two + 2,
     fontSize: 15,
   },
+  micButton: {
+    width: 40,
+    height: 40,
+    borderRadius: Spacing.three,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sendButton: {
     width: 40,
     height: 40,
     borderRadius: Spacing.three,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  voiceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  voiceLabelStack: {
+    flex: 1,
+    gap: 2,
+  },
+  voiceStopButton: {
+    width: 36,
+    height: 36,
+    borderRadius: Spacing.three,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelBars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    width: 32,
+    height: 24,
+  },
+  levelBar: {
+    width: 4,
+    borderRadius: 2,
   },
 });

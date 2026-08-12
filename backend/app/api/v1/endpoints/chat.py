@@ -1,7 +1,7 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
@@ -89,6 +89,23 @@ async def transcribe_voice(audio: UploadFile = File(...)) -> VoiceTranscribeResp
 def speak_text(payload: VoiceSpeakRequest) -> StreamingResponse:
     try:
         chunks = voice_service.open_speech_stream(payload.text)
+    except ChatServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return StreamingResponse(chunks, media_type="audio/mpeg")
+
+
+@router.get("/voice/speak")
+def speak_text_from_query(text: str = Query(..., min_length=1)) -> StreamingResponse:
+    """GET variant of the same synthesis, taking `text` as a query param.
+
+    The web client streams this via `fetch` (so it can set custom headers
+    and pipe the body into MediaSource), but native audio players
+    (`expo-audio`'s `useAudioPlayer`) only accept a bare URL — they can't
+    POST a JSON body — so the mobile app points its player straight at
+    this route instead.
+    """
+    try:
+        chunks = voice_service.open_speech_stream(text)
     except ChatServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return StreamingResponse(chunks, media_type="audio/mpeg")

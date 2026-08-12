@@ -44,7 +44,6 @@ export function DateTimeField({ label, value, mode, onChange }: DateTimeFieldPro
       <ThemedText type="small" themeColor="textSecondary">
         {label}
       </ThemedText>
-      {/* eslint-disable-next-line react/forbid-elements -- web-only file; the native module this replaces has no web target */}
       <input
         type={mode}
         value={htmlValue}

@@ -19,5 +19,11 @@ class Settings(BaseSettings):
     OPENAI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     CHAT_MAX_TOOL_ROUNDTRIPS: int = 5
 
+    # Voice: Deepgram is the primary STT/TTS provider (faster, cheaper);
+    # OpenAI is the fallback whenever Deepgram is unset or a call to it
+    # fails. See app/services/voice_service.py.
+    DEEPGRAM_API_KEY: str | None = None
+    DEEPGRAM_REQUEST_TIMEOUT_SECONDS: float = 15.0
+
 
 settings = Settings()
