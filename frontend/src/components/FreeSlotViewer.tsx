@@ -385,7 +385,7 @@ export default function FreeSlotViewer({
   return (
     <section className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex shrink-0 items-center gap-2">
-        <CalendarClock className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+        <CalendarClock className="h-5 w-5 text-teal-600 dark:text-teal-400" />
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
           Daily Timeline &amp; Free Slots
         </h2>
@@ -419,15 +419,15 @@ export default function FreeSlotViewer({
           </div>
           {selectedDayStats && (
             <div className="mt-3 flex flex-wrap gap-2">
-              <StatChip label="Free" value={formatDuration(selectedDayStats.freeMinutesTotal)} tone="emerald" />
-              <StatChip label="Busy" value={formatDuration(selectedDayStats.busyMinutesTotal)} tone="red" />
+              <StatChip label="Free" value={formatDuration(selectedDayStats.freeMinutesTotal)} tone="free" />
+              <StatChip label="Busy" value={formatDuration(selectedDayStats.busyMinutesTotal)} tone="busy" />
               {selectedDayStats.longestFree && (
                 <StatChip
                   label="Longest free stretch"
                   value={`${formatDuration(selectedDayStats.longestFree.minutes)} · ${formatClockTime(
                     selectedDayStats.longestFree.start,
                   )}–${formatClockTime(selectedDayStats.longestFree.end)}`}
-                  tone="emerald"
+                  tone="free"
                 />
               )}
               {selectedDayStats.longestBusy && (
@@ -436,7 +436,7 @@ export default function FreeSlotViewer({
                   value={`${formatDuration(selectedDayStats.longestBusy.minutes)} · ${formatClockTime(
                     selectedDayStats.longestBusy.start,
                   )}–${formatClockTime(selectedDayStats.longestBusy.end)}`}
-                  tone="red"
+                  tone="busy"
                 />
               )}
             </div>
@@ -545,21 +545,21 @@ export default function FreeSlotViewer({
 }
 
 /** Small labeled pill for a single day-stat (free/busy totals, longest stretches). */
-function StatChip({ label, value, tone }: { label: string; value: string; tone: "emerald" | "red" }) {
+function StatChip({ label, value, tone }: { label: string; value: string; tone: "free" | "busy" }) {
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs",
-        tone === "emerald"
-          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-500/10"
-          : "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-500/10",
+        tone === "free"
+          ? "border-teal-200 bg-teal-50 dark:border-teal-900/40 dark:bg-teal-500/10"
+          : "border-slate-200 bg-slate-50 dark:border-slate-800/60 dark:bg-slate-500/10",
       )}
     >
       <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
       <span
         className={cn(
           "font-semibold",
-          tone === "emerald" ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400",
+          tone === "free" ? "text-teal-700 dark:text-teal-400" : "text-slate-700 dark:text-slate-300",
         )}
       >
         {value}
@@ -669,7 +669,7 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
               className={cn(
                 "relative flex flex-col items-start gap-1.5 rounded-lg border p-2 pb-3.5 text-left transition",
                 inCurrentMonth
-                  ? "border-zinc-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/5"
+                  ? "border-zinc-200 bg-white hover:border-teal-400 hover:bg-teal-50/50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-teal-500/50 dark:hover:bg-teal-500/5"
                   : "cursor-default border-transparent bg-transparent",
                 // Non-working day (weekend) — a muted tint that yields to the
                 // stronger open/booked tints below when both apply, since
@@ -678,11 +678,11 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
                 inCurrentMonth && isWeekend && "bg-zinc-50/80 dark:bg-zinc-800/30",
                 inCurrentMonth &&
                   isFullyOpen &&
-                  "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-500/5",
+                  "border-teal-200 bg-teal-50/60 dark:border-teal-900/40 dark:bg-teal-500/5",
                 inCurrentMonth &&
                   isFullyBooked &&
-                  "border-red-200/70 bg-red-50/50 dark:border-red-900/40 dark:bg-red-500/5",
-                isToday && "ring-2 ring-inset ring-emerald-500",
+                  "border-slate-300/70 bg-slate-100/50 dark:border-slate-700/60 dark:bg-slate-500/5",
+                isToday && "ring-2 ring-inset ring-violet-500",
               )}
             >
               <span className="flex items-baseline gap-1">
@@ -709,31 +709,31 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
 
               {inCurrentMonth && (hasMeeting || hasOfficeHours || summary?.hasFree) && (
                 <span className="flex gap-1">
-                  {hasMeeting && <span className="h-1.5 w-1.5 rounded-full bg-red-500" />}
+                  {hasMeeting && <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />}
                   {hasOfficeHours && <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
-                  {summary?.hasFree && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                  {summary?.hasFree && <span className="h-1.5 w-1.5 rounded-full bg-teal-500" />}
                 </span>
               )}
 
               {inCurrentMonth && summary && (summary.freeMinutes > 0 || summary.busyMinutes > 0) && (
                 <span className="hidden w-full min-w-0 items-center gap-1 truncate text-[9px] font-semibold leading-none tabular-nums sm:flex">
-                  <span className="text-emerald-600 dark:text-emerald-400">
+                  <span className="text-teal-600 dark:text-teal-400">
                     {formatCompactHours(summary.freeMinutes)}
                   </span>
                   <span className="text-zinc-300 dark:text-zinc-700">/</span>
-                  <span className="text-red-500 dark:text-red-400">{formatCompactHours(summary.busyMinutes)}</span>
+                  <span className="text-slate-500 dark:text-slate-400">{formatCompactHours(summary.busyMinutes)}</span>
                 </span>
               )}
 
               {inCurrentMonth && summary && (summary.longestFree || summary.longestBusy) && (
                 <span className="hidden w-full min-w-0 items-center gap-1 truncate text-[9px] leading-none tabular-nums sm:flex">
                   {summary.longestFree && (
-                    <span className="shrink-0 text-emerald-600/70 dark:text-emerald-400/70">
+                    <span className="shrink-0 text-teal-600/70 dark:text-teal-400/70">
                       {formatCompactRange(summary.longestFree)}
                     </span>
                   )}
                   {summary.longestBusy && (
-                    <span className="truncate text-red-500/70 dark:text-red-400/70">
+                    <span className="truncate text-slate-500/70 dark:text-slate-400/70">
                       {formatCompactRange(summary.longestBusy)}
                     </span>
                   )}
@@ -745,7 +745,7 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
                   <span
                     className={cn(
                       "block h-full rounded-full",
-                      isFullyBooked ? "bg-red-400 dark:bg-red-500/80" : "bg-emerald-500 dark:bg-emerald-500/90",
+                      isFullyBooked ? "bg-slate-400 dark:bg-slate-500/80" : "bg-teal-500 dark:bg-teal-500/90",
                     )}
                     style={{ width: `${meterWidthPct}%` }}
                   />
@@ -1031,7 +1031,7 @@ function DayColumn({
             title={`Free: ${formatTime(slot.start_time)} – ${formatTime(slot.end_time)} (${formatDuration(
               slot.duration_minutes,
             )}) — click to add an engagement`}
-            className="absolute inset-x-1 z-10 overflow-hidden rounded-md bg-emerald-500 px-1.5 py-0.5 text-left text-[11px] font-medium text-white transition hover:bg-emerald-600 dark:bg-emerald-500/90 dark:hover:bg-emerald-500"
+            className="absolute inset-x-1 z-10 overflow-hidden rounded-md bg-teal-500 px-1.5 py-0.5 text-left text-[11px] font-medium text-white transition hover:bg-teal-600 dark:bg-teal-500/90 dark:hover:bg-teal-500"
             style={{ top: `${topPct}%`, height: `${heightPct}%` }}
           >
             {heightPct > 3 && <span className="truncate">{formatDuration(slot.duration_minutes)}</span>}

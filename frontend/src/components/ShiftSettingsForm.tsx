@@ -177,7 +177,7 @@ export default function ShiftSettingsForm({ shift, onSaved }: ShiftSettingsFormP
         </div>
       )}
       {justSaved && (
-        <p className="mt-3 text-xs text-emerald-600 dark:text-emerald-400">
+        <p className="mt-3 text-xs text-teal-600 dark:text-teal-400">
           Saved — the availability view now uses this by default.
         </p>
       )}

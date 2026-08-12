@@ -18,19 +18,19 @@ export const CATEGORY_LABELS: Record<EngagementCategory, string> = {
 /** Badge styling for compact category pills (cards, list rows). */
 export const CATEGORY_BADGE_CLASSES: Record<EngagementCategory, string> = {
   meeting:
-    "bg-red-500/15 text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-500/30",
+    "bg-blue-500/15 text-blue-700 dark:text-blue-400 ring-1 ring-inset ring-blue-500/30",
   interview:
-    "bg-rose-500/15 text-rose-700 dark:text-rose-400 ring-1 ring-inset ring-rose-500/30",
+    "bg-violet-500/15 text-violet-700 dark:text-violet-400 ring-1 ring-inset ring-violet-500/30",
   office_hours:
     "bg-orange-500/15 text-orange-700 dark:text-orange-400 ring-1 ring-inset ring-orange-500/30",
   personal:
     "bg-sky-500/15 text-sky-700 dark:text-sky-400 ring-1 ring-inset ring-sky-500/30",
 };
 
-/** Solid fill styling for timeline busy blocks — reds for meetings/interviews, orange for office hours/personal. */
+/** Solid fill styling for timeline busy blocks — blue for meetings, violet for interviews, orange for office hours/personal. */
 export const CATEGORY_BLOCK_CLASSES: Record<EngagementCategory, string> = {
-  meeting: "bg-red-500 dark:bg-red-500/90",
-  interview: "bg-red-600 dark:bg-red-600/90",
+  meeting: "bg-blue-500 dark:bg-blue-500/90",
+  interview: "bg-violet-500 dark:bg-violet-500/90",
   office_hours: "bg-orange-500 dark:bg-orange-500/90",
   personal: "bg-orange-400 dark:bg-orange-400/90",
 };

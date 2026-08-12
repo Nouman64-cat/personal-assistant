@@ -93,7 +93,7 @@ export default function ChatMessageBubble({
         </div>
         {conflict &&
           (conflict.available ? (
-            <div className="flex w-full items-start gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+            <div className="flex w-full items-start gap-2 rounded-xl border border-teal-300 bg-teal-50 px-3 py-2.5 text-xs text-teal-900 dark:border-teal-900/50 dark:bg-teal-950/30 dark:text-teal-300">
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
                 Free from {formatClockTime(new Date(conflict.attempted_start_time))} to{" "}

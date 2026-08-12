@@ -171,6 +171,10 @@ export default function EngagementList({
     const start = parseNaiveIso(engagement.start_time);
     const end = parseNaiveIso(engagement.end_time);
     const isHappeningNow = start <= now && now <= end;
+    // Nothing marks this in the database — it's derived purely from the clock,
+    // so an engagement flips to "Done" the instant its end_time passes, with
+    // no action needed from the user.
+    const isDone = end < now;
     const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60_000);
     const isConfirming = confirmingId === engagement.id;
     const isDeleting = deletingId === engagement.id;
@@ -181,7 +185,7 @@ export default function EngagementList({
         className={cn(
           "flex items-stretch gap-2.5 overflow-hidden rounded-xl border transition",
           isHappeningNow
-            ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-500/5"
+            ? "border-teal-300 bg-teal-50/60 dark:border-teal-800 dark:bg-teal-500/5"
             : "border-zinc-200 dark:border-zinc-800",
         )}
       >
@@ -213,9 +217,15 @@ export default function EngagementList({
               </span>
             )}
             {isHappeningNow && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+              <span className="inline-flex items-center gap-1 rounded-full bg-teal-500/15 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:text-teal-400">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal-500" />
                 Now
+              </span>
+            )}
+            {isDone && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-zinc-500/15 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+                <Check className="h-3 w-3" />
+                Done
               </span>
             )}
           </div>

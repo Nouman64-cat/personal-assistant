@@ -33,8 +33,8 @@ interface FreeSlotsCardProps {
    * at one edge (or fully booked, though that day just won't appear here). */
   shift: ShiftSettings;
   /** When set (a conflict or check_availability turn), segment(s) overlapping
-   * this exact time range get a ring highlight — green if it landed on a free
-   * stretch (confirming availability), amber/red if busy (the conflict). */
+   * this exact time range get a ring highlight — teal if it landed on a free
+   * stretch (confirming availability), amber if busy (the conflict). */
   highlightRange?: { start: string; end: string };
 }
 
@@ -150,30 +150,30 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift, highlight
   }
 
   return (
-    <div className="w-full space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+    <div className="w-full space-y-3 rounded-xl border border-teal-200 bg-teal-50/60 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-teal-700">
           <CalendarCheck className="h-3.5 w-3.5" />
           Available slots
         </div>
         <div className="flex items-center gap-2.5 text-[10px] text-zinc-500">
           <span className="inline-flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="h-2 w-2 rounded-full bg-teal-500" />
             Free
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-red-300" />
+            <span className="h-2 w-2 rounded-full bg-slate-300" />
             Busy
           </span>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-emerald-200/70 pt-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-t border-teal-200/70 pt-2.5">
         <select
           value={targetTimeZone}
           onChange={(event) => setTargetTimeZone(event.target.value)}
           aria-label="Timezone for copied availability"
-          className="rounded-lg border border-emerald-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30"
+          className="rounded-lg border border-teal-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
         >
           {timeZoneOptions.map((zone) => (
             <option key={zone.value} value={zone.value}>
@@ -187,8 +187,8 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift, highlight
           className={cn(
             "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition",
             copied
-              ? "bg-emerald-600 text-white"
-              : "bg-white text-emerald-700 ring-1 ring-inset ring-emerald-300 hover:bg-emerald-100",
+              ? "bg-teal-600 text-white"
+              : "bg-white text-teal-700 ring-1 ring-inset ring-teal-300 hover:bg-teal-100",
           )}
         >
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -255,8 +255,8 @@ export default function FreeSlotsCard({ slots, busyEngagements, shift, highlight
                         <div
                           className={cn(
                             "h-6",
-                            isFree ? "bg-emerald-500" : isHighlighted ? "bg-red-500" : "bg-red-300",
-                            isHighlighted && (isFree ? "ring-2 ring-emerald-700 ring-offset-1" : "ring-2 ring-amber-500 ring-offset-1"),
+                            isFree ? "bg-teal-500" : isHighlighted ? "bg-slate-500" : "bg-slate-300",
+                            isHighlighted && (isFree ? "ring-2 ring-teal-700 ring-offset-1" : "ring-2 ring-amber-500 ring-offset-1"),
                             index === 0 && "rounded-l-md",
                             index === segments.length - 1 && "rounded-r-md",
                           )}

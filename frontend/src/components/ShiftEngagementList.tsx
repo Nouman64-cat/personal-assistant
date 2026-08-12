@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarX2, ChevronDown, Loader2, Moon, Plus, Sun } from "lucide-react";
+import { AlertTriangle, CalendarX2, Check, ChevronDown, Loader2, Moon, Plus, Sun } from "lucide-react";
 
 import EngagementFormModal from "@/components/EngagementFormModal";
 import { ApiError, listEngagements } from "@/lib/api";
@@ -231,7 +231,7 @@ export default function ShiftEngagementList({ shift, refreshSignal, onChanged }:
         className={cn(
           "rounded-xl border p-3",
           isCurrent
-            ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-500/5"
+            ? "border-teal-300 bg-teal-50/50 dark:border-teal-800 dark:bg-teal-500/5"
             : "border-zinc-200 dark:border-zinc-800",
         )}
       >
@@ -243,8 +243,8 @@ export default function ShiftEngagementList({ shift, refreshSignal, onChanged }:
           )}
           <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">{formatShiftLabel(group)}</span>
           {isCurrent && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-teal-500/15 px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:text-teal-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal-500" />
               On shift now
             </span>
           )}
@@ -270,7 +270,7 @@ export default function ShiftEngagementList({ shift, refreshSignal, onChanged }:
 
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
           <div
-            className={cn("h-full rounded-full", utilizationPct >= 90 ? "bg-red-500" : "bg-emerald-500")}
+            className={cn("h-full rounded-full", utilizationPct >= 90 ? "bg-amber-500" : "bg-teal-500")}
             style={{ width: `${utilizationPct}%` }}
           />
         </div>
@@ -292,6 +292,9 @@ export default function ShiftEngagementList({ shift, refreshSignal, onChanged }:
               const start = parseNaiveIso(engagement.start_time);
               const end = parseNaiveIso(engagement.end_time);
               const isOutside = !(start < group.shiftEnd && end > group.shiftStart);
+              // Derived purely from the clock — no field to update, so this
+              // flips to "Done" the instant end_time passes.
+              const isDone = end < now;
               // Off-shift time can spill into the next calendar day within the
               // same 24h shift-day bucket — call out the date so a "5:00 PM"
               // row sorted after "9:00 PM" ones doesn't look out of order.
@@ -321,6 +324,12 @@ export default function ShiftEngagementList({ shift, refreshSignal, onChanged }:
                   {isOutside && (
                     <span className="shrink-0 rounded-full bg-zinc-500/15 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
                       Off-shift
+                    </span>
+                  )}
+                  {isDone && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-zinc-500/15 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
+                      <Check className="h-2.5 w-2.5" />
+                      Done
                     </span>
                   )}
                   <span className="shrink-0 text-[11px] text-zinc-400 dark:text-zinc-500">

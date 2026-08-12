@@ -7,7 +7,7 @@ const ACTION_META = {
   created: {
     icon: Plus,
     label: "Created",
-    classes: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-400",
+    classes: "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900/50 dark:bg-teal-950/40 dark:text-teal-400",
   },
   updated: {
     icon: Pencil,
