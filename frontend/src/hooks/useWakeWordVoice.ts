@@ -153,9 +153,11 @@ async function playAudioResponse(response: Response, isAborted: () => boolean): 
  *    RMS-based silence detector. That clip is the only audio sent to
  *    OpenAI, transcribed via the cheap gpt-4o-mini-transcribe model.
  *
- * The transcript is hand off to `onCommand` (the caller's normal chat-send
- * path, so CRUD tool-calling is unchanged) and the reply is spoken back
- * with gpt-4o-mini-tts, prefixed "Lord," for the requested persona.
+ * The transcript is handed off to `onCommand` (the caller's normal
+ * chat-send path, so CRUD tool-calling is unchanged) — the caller resolves
+ * with a short, natural spoken line built from the turn's structured data
+ * (see buildSpokenReply in voicePhrasing.ts) rather than the on-screen
+ * `reply` prose, which is then spoken with gpt-4o-mini-tts.
  */
 export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWakeWordVoiceResult {
   const [enabled, setEnabled] = useState(false);
@@ -409,11 +411,13 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     }
   }
 
-  async function speak(replyText: string) {
+  async function speak(spokenText: string) {
     if (stoppedRef.current) return;
     setStatus("speaking");
     try {
-      const response = await openSpeechStream(`Lord, ${replyText}`);
+      // `spokenText` is already the short natural line built by
+      // buildSpokenReply — this call just turns it into audio.
+      const response = await openSpeechStream(spokenText);
       if (stoppedRef.current) return;
       await playAudioResponse(response, () => stoppedRef.current);
     } catch {

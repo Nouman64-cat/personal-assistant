@@ -8,6 +8,7 @@ import { ApiError, getChatHistory, sendChatMessage } from "@/lib/api";
 import { useAppState } from "@/lib/appState";
 import type { BusyEngagementInfo, ConflictInfo, EngagementAction, FreeSlotItem, LookedUpEngagement } from "@/lib/types";
 import { cn, formatDayLabel } from "@/lib/utils";
+import { buildSpokenReply } from "@/lib/voicePhrasing";
 
 import ChatMessageBubble from "./ChatMessageBubble";
 
@@ -224,9 +225,10 @@ export default function ChatPanel() {
   }, [messages, isSending]);
 
   // Shared by the textarea's send button and the "Bella" voice loop below —
-  // runs one full chat turn and resolves with the reply text, so the voice
-  // hook can speak it back without duplicating any of the session/actions
-  // bookkeeping.
+  // runs one full chat turn and resolves with a short spoken-friendly line
+  // (see buildSpokenReply) so the voice hook can speak it back without
+  // duplicating any of the session/actions bookkeeping. The on-screen bubble
+  // still gets the full written `reply`, unaffected.
   async function sendTurn(trimmed: string): Promise<string> {
     setMessages((previous) => [...previous, { role: "user", content: trimmed }]);
     setIsSending(true);
@@ -255,7 +257,7 @@ export default function ChatPanel() {
         },
       ]);
       if (response.actions.length > 0) triggerRefresh();
-      return response.reply;
+      return buildSpokenReply(response);
     } catch (caught) {
       const message = caught instanceof ApiError ? caught.message : "Something went wrong sending that message.";
       setError(message);
