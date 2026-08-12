@@ -1,18 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Loader2, MessageSquarePlus, Mic, MicOff, Send, Sparkles, Volume2 } from "lucide-react";
+import { AlertTriangle, Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-react";
 
-import { useWakeWordVoice, type VoiceStatus } from "@/hooks/useWakeWordVoice";
-import { ApiError, getChatHistory, sendChatMessage } from "@/lib/api";
 import { useAppState } from "@/lib/appState";
-import type { BusyEngagementInfo, ConflictInfo, EngagementAction, FreeSlotItem, LookedUpEngagement } from "@/lib/types";
+import { useChatState } from "@/lib/chatState";
 import { cn, formatDayLabel } from "@/lib/utils";
-import { buildSpokenReply } from "@/lib/voicePhrasing";
 
 import ChatMessageBubble from "./ChatMessageBubble";
-
-const SESSION_STORAGE_KEY = "chat_session_id";
 
 const SUGGESTED_PROMPTS = [
   "Schedule a call with Sam tomorrow at 3pm",
@@ -20,22 +15,6 @@ const SUGGESTED_PROMPTS = [
   "Am I available Friday at 2pm EST?",
   "Move my 4pm to 5pm",
 ];
-
-const VOICE_STATUS_LABELS: Record<VoiceStatus, string> = {
-  idle: "Off",
-  listening: 'Listening for "Bella"',
-  recording: "Recording your command…",
-  processing: "Thinking…",
-  speaking: "Speaking…",
-};
-
-const VOICE_STATUS_CLASSES: Record<VoiceStatus, string> = {
-  idle: "text-zinc-500 dark:text-zinc-400",
-  listening: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
-  recording: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
-  processing: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-  speaking: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
-};
 
 const WEEKDAY_AUTO_SELECT_MS = 4500;
 /** Index 0 = Sunday, matching `Date.getDay()`. */
@@ -94,25 +73,11 @@ function formatWeekdayReplacement(date: Date): string {
   return `${weekdayName}, ${monthDay}`;
 }
 
-interface DisplayMessage {
-  role: "user" | "assistant";
-  content: string;
-  actions?: EngagementAction[];
-  freeSlots?: FreeSlotItem[];
-  busyEngagements?: BusyEngagementInfo[];
-  conflict?: ConflictInfo | null;
-  lookedUpEngagements?: LookedUpEngagement[];
-}
-
 export default function ChatPanel() {
-  const { shift, triggerRefresh } = useAppState();
+  const { shift } = useAppState();
+  const { messages, isSending, isHydrating, error, sendTurn, handleNewChat } = useChatState();
 
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [isHydrating, setIsHydrating] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -171,103 +136,9 @@ export default function ChatPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchKey, isWeekdayPickerOpen]);
 
-  const detectedTimezone = useMemo(() => {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      return "UTC";
-    }
-  }, []);
-  const timezone = shift?.timezone ?? detectedTimezone;
-
-  useEffect(() => {
-    const storedSessionId = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!storedSessionId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsHydrating(false);
-      return;
-    }
-
-    let cancelled = false;
-    getChatHistory(storedSessionId)
-      .then((history) => {
-        if (cancelled) return;
-        setSessionId(history.session_id);
-        setMessages(
-          history.messages.map((message) => ({
-            role: message.role,
-            content: message.content,
-            actions: message.actions,
-            freeSlots: message.free_slots,
-            busyEngagements: message.busy_engagements,
-            lookedUpEngagements: message.looked_up_engagements,
-          })),
-        );
-      })
-      .catch((caught) => {
-        if (cancelled) return;
-        if (caught instanceof ApiError && caught.status === 404) {
-          window.localStorage.removeItem(SESSION_STORAGE_KEY);
-        } else {
-          setError(caught instanceof ApiError ? caught.message : "Failed to load conversation history.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsHydrating(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isSending]);
-
-  // Shared by the textarea's send button and the "Bella" voice loop below —
-  // runs one full chat turn and resolves with a short spoken-friendly line
-  // (see buildSpokenReply) so the voice hook can speak it back without
-  // duplicating any of the session/actions bookkeeping. The on-screen bubble
-  // still gets the full written `reply`, unaffected.
-  async function sendTurn(trimmed: string): Promise<string> {
-    setMessages((previous) => [...previous, { role: "user", content: trimmed }]);
-    setIsSending(true);
-    setError(null);
-
-    try {
-      const response = await sendChatMessage({
-        session_id: sessionId,
-        message: trimmed,
-        timezone,
-      });
-      if (response.session_id !== sessionId) {
-        setSessionId(response.session_id);
-        window.localStorage.setItem(SESSION_STORAGE_KEY, response.session_id);
-      }
-      setMessages((previous) => [
-        ...previous,
-        {
-          role: "assistant",
-          content: response.reply,
-          actions: response.actions,
-          freeSlots: response.free_slots,
-          busyEngagements: response.busy_engagements,
-          conflict: response.conflict,
-          lookedUpEngagements: response.looked_up_engagements,
-        },
-      ]);
-      if (response.actions.length > 0) triggerRefresh();
-      return buildSpokenReply(response);
-    } catch (caught) {
-      const message = caught instanceof ApiError ? caught.message : "Something went wrong sending that message.";
-      setError(message);
-      throw new Error(message);
-    } finally {
-      setIsSending(false);
-    }
-  }
-
-  const voice = useWakeWordVoice({ onCommand: sendTurn });
 
   async function handleSend() {
     const trimmed = input.trim();
@@ -276,15 +147,8 @@ export default function ChatPanel() {
     try {
       await sendTurn(trimmed);
     } catch {
-      // Already surfaced via setError inside sendTurn.
+      // Already surfaced via the shared error state.
     }
-  }
-
-  function handleNewChat() {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    setSessionId(null);
-    setMessages([]);
-    setError(null);
   }
 
   return (
@@ -297,74 +161,21 @@ export default function ChatPanel() {
               <Sparkles className="h-4.5 w-4.5" />
             </span>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Chat</h2>
-                {voice.enabled && (
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                      VOICE_STATUS_CLASSES[voice.status],
-                    )}
-                  >
-                    {VOICE_STATUS_LABELS[voice.status]}
-                  </span>
-                )}
-              </div>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Chat</h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                {voice.enabled
-                  ? 'Say "Bella" any time to give a hands-free command.'
-                  : "Tell it what to schedule, move, or cancel — it remembers this conversation."}
+                Tell it what to schedule, move, or cancel — or say &ldquo;Bella&rdquo; from anywhere in the app.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={voice.toggle}
-              disabled={!voice.supported}
-              title={
-                !voice.supported
-                  ? "Voice isn't supported in this browser — try Chrome or Edge"
-                  : voice.enabled
-                    ? 'Turn off the "Bella" voice assistant'
-                    : 'Turn on the "Bella" voice assistant'
-              }
-              aria-pressed={voice.enabled}
-              className={cn(
-                "relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:opacity-40",
-                voice.enabled
-                  ? VOICE_STATUS_CLASSES[voice.status]
-                  : "text-zinc-500 hover:bg-white hover:shadow-sm dark:text-zinc-400 dark:hover:bg-zinc-800",
-              )}
-            >
-              {voice.enabled && (voice.status === "listening" || voice.status === "recording") && (
-                <span
-                  className={cn(
-                    "absolute inset-0 animate-ping rounded-lg opacity-40",
-                    voice.status === "recording" ? "bg-red-400" : "bg-violet-400",
-                  )}
-                />
-              )}
-              {voice.status === "processing" ? (
-                <Loader2 className="relative h-4 w-4 animate-spin" />
-              ) : voice.status === "speaking" ? (
-                <Volume2 className="relative h-4 w-4" />
-              ) : voice.enabled ? (
-                <Mic className="relative h-4 w-4" />
-              ) : (
-                <MicOff className="relative h-4 w-4" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={handleNewChat}
-              disabled={messages.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              <MessageSquarePlus className="h-3.5 w-3.5" />
-              New Chat
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={messages.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+            New Chat
+          </button>
         </div>
       </div>
 
@@ -434,12 +245,6 @@ export default function ChatPanel() {
         <div className="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
-        </div>
-      )}
-      {voice.error && (
-        <div className="mx-5 mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
-          <MicOff className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{voice.error}</span>
         </div>
       )}
 

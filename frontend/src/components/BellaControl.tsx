@@ -50,6 +50,7 @@ export default function BellaControl() {
 
   useEffect(() => {
     if (!voice.lastHeard && !voice.lastSpoken) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCaptionVisible(false);
       return;
     }
@@ -59,6 +60,7 @@ export default function BellaControl() {
   }, [voice.lastHeard, voice.lastSpoken]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (voice.error) setErrorDismissed(false);
   }, [voice.error]);
 

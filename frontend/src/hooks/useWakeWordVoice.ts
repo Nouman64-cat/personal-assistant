@@ -444,9 +444,7 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
       stopAll();
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("idle");
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastHeard(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastSpoken(null);
     }
     return () => {
