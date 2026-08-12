@@ -163,7 +163,7 @@ export default function ChatPanel() {
             <div>
               <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Chat</h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Tell it what to schedule, move, or cancel — or say &ldquo;Bella&rdquo; from anywhere in the app.
+                Tell it what to schedule, move, or cancel — or say &ldquo;Julie&rdquo; from anywhere in the app.
               </p>
             </div>
           </div>

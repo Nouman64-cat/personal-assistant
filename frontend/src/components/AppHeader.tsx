@@ -2,11 +2,11 @@
 
 import { Sparkles } from "lucide-react";
 
-import BellaControl from "./BellaControl";
+import JulieControl from "./JulieControl";
 
 /**
  * Persistent header above the routed page content, on every page — this is
- * what makes the "Bella" voice assistant reachable from anywhere in the app
+ * what makes the "Julie" voice assistant reachable from anywhere in the app
  * instead of only from the Chat page. On mobile it also carries the brand
  * mark, since the sidebar (which normally shows it) is hidden there.
  */
@@ -18,7 +18,7 @@ export default function AppHeader() {
         <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Personal Assistant</span>
       </div>
       <div className="hidden md:block" />
-      <BellaControl />
+      <JulieControl />
     </header>
   );
 }

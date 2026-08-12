@@ -62,5 +62,5 @@ export function buildSpokenReply(response: ChatMessageResponse): string {
   } else {
     body = response.reply;
   }
-  return `Lord, ${body}`;
+  return body;
 }

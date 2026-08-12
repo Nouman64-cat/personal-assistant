@@ -17,19 +17,20 @@ logger = logging.getLogger(__name__)
 # error, non-2xx response — falls back to OpenAI transparently; callers only
 # ever see ChatServiceError if *both* providers fail.
 DEEPGRAM_STT_MODEL = "nova-3"
-DEEPGRAM_TTS_MODEL = "aura-2-harmonia-en"  # "Empathetic, Clear, Calm, Confident" — fits the "Bella" persona
+DEEPGRAM_TTS_MODEL = "aura-2-harmonia-en"  # "Empathetic, Clear, Calm, Confident" — fits the "Julie" persona
 DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen"
 DEEPGRAM_SPEAK_URL = "https://api.deepgram.com/v1/speak"
 
 # --- OpenAI (fallback) --------------------------------------------------------
 TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 SPEECH_MODEL = "gpt-4o-mini-tts"
-SPEECH_VOICE = "shimmer"  # soft, soothing — a female-presenting voice for "Bella"
+SPEECH_VOICE = "shimmer"  # soft, soothing — a female-presenting voice for "Julie"
 SPEECH_INSTRUCTIONS = (
-    "Speak in a warm, composed, deeply respectful tone, like a devoted attendant "
-    "addressing their lord. Natural human conversational pacing — real breath "
-    "pauses between phrases, gentle rise and fall in pitch, unhurried but never "
-    "sluggish. Never flat or robotic."
+    "Speak in a warm, upbeat, friendly tone — like a cheerful, energetic personal "
+    "assistant who's genuinely glad to hear from you, not formal or subservient. "
+    "Natural human conversational pacing — real breath pauses between phrases, "
+    "gentle rise and fall in pitch, unhurried but never sluggish. Never flat or "
+    "robotic."
 )
 
 

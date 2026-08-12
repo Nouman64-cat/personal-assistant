@@ -45,7 +45,7 @@ function describeLookup(engagements: LookedUpEngagement[]): string {
  *
  * The on-screen `reply` is written for reading — it can run a full
  * paragraph explaining a CRUD confirmation or a lookup answer. Speaking
- * that verbatim is what made Bella sound like she was reading a report
+ * that verbatim is what made Julie sound like she was reading a report
  * instead of talking to you. This picks the concrete outcome (what was
  * done, or what was found) straight out of the structured turn data
  * already on `response` — no extra network round trip, so it doesn't cost
@@ -69,5 +69,5 @@ export function buildSpokenReply(response: ChatMessageResponse): string {
   } else {
     body = response.reply;
   }
-  return `Lord, ${body}`;
+  return body;
 }

@@ -8,8 +8,8 @@ import { useChatState } from "@/lib/chatState";
 import { cn } from "@/lib/utils";
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
-  idle: 'Say "Bella" to wake her',
-  listening: 'Listening for "Bella"…',
+  idle: 'Say "Julie" to wake her',
+  listening: 'Listening for "Julie"…',
   recording: "I'm listening…",
   processing: "One moment…",
   speaking: "Speaking…",
@@ -42,7 +42,7 @@ function EqualizerBars({ tone }: { tone: "rose" | "emerald" | "white" }) {
   );
 }
 
-export default function BellaControl() {
+export default function JulieControl() {
   const { sendTurn } = useChatState();
   const voice = useWakeWordVoice({ onCommand: sendTurn });
   const [captionVisible, setCaptionVisible] = useState(false);
@@ -78,8 +78,8 @@ export default function BellaControl() {
           !voice.supported
             ? "Voice isn't supported in this browser — try Chrome or Edge"
             : voice.enabled
-              ? 'Turn off the "Bella" voice assistant'
-              : 'Turn on the "Bella" voice assistant'
+              ? 'Turn off the "Julie" voice assistant'
+              : 'Turn on the "Julie" voice assistant'
         }
         className={cn(
           "group relative flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40",
@@ -127,7 +127,7 @@ export default function BellaControl() {
 
         <span className="flex flex-col items-start leading-none">
           <span className={cn("text-xs font-semibold", voice.enabled ? "text-zinc-900 dark:text-zinc-50" : "")}>
-            Bella
+            Julie
           </span>
           <span
             className={cn(
@@ -149,14 +149,14 @@ export default function BellaControl() {
         )}
       </button>
 
-      {/* Live caption — what Bella just heard and replied, so a voice turn
+      {/* Live caption — what Julie just heard and replied, so a voice turn
           from any page gives visible confirmation without needing the Chat
           page open. Auto-dismisses a few seconds after the exchange ends. */}
       {captionVisible && (voice.lastHeard || voice.lastSpoken) && (
         <div className="animate-voice-pop-in absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
           <div className="flex items-center justify-between border-b border-zinc-100 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent px-3 py-2 dark:border-zinc-700">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
-              Bella
+              Julie
             </span>
             <button
               type="button"

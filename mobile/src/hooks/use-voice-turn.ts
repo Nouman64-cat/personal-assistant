@@ -39,7 +39,7 @@ interface UseVoiceTurnResult {
  * the caller's normal chat-send path (so CRUD tool-calling is identical to
  * typed chat), then speak the reply back with gpt-4o-mini-tts.
  *
- * Unlike the web app's always-listening "Bella" wake word (built on the
+ * Unlike the web app's always-listening "Julie" wake word (built on the
  * browser's SpeechRecognition API, which has no native equivalent), this is
  * explicitly user-initiated — see the mobile voice-UX decision to use
  * tap-to-talk instead of adding a native wake-word module.

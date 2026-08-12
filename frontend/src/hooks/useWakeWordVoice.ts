@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { openSpeechStream, transcribeVoice } from "@/lib/api";
 
-const WAKE_WORD_PATTERN = /\bbella\b/i;
+const WAKE_WORD_PATTERN = /\bjulie\b/i;
 /** How long the mic has to stay quiet before a command recording is considered finished. Kept snappy — long pauses here are the main thing that makes a voice assistant feel laggy. */
 const SILENCE_MS = 900;
 /** Silence is only evaluated once at least this much time has passed and the user has spoken at least once — avoids stopping on the initial dead air before they start talking. */
@@ -13,6 +13,26 @@ const MIN_RECORD_BEFORE_SILENCE_CHECK_MS = 400;
 const MAX_RECORD_MS = 20_000;
 /** RMS (0..1) above which a video frame counts as "someone is talking", not ambient noise. */
 const VOICE_RMS_THRESHOLD = 0.02;
+/**
+ * After finishing a reply, Julie stays actively listening for a follow-up
+ * command — no need to repeat the wake word — for this long. If nobody's
+ * said anything by the time this elapses, that counts as "long inactivity"
+ * and she drops back to wake-word-gated listening to save the round trip.
+ */
+const FOLLOWUP_NO_SPEECH_TIMEOUT_MS = 12_000;
+
+/** Warm, energetic openers spoken the moment the wake word fires — picked at random so it doesn't feel like a canned response every time. */
+const WAKE_GREETINGS = [
+  "Hey! Great to hear from you — what can I help you with?",
+  "Hey there! Hope you're having a great day. Want to check your schedule, or add something new?",
+  "Hi! I'm all ears — what's up?",
+  "Hey! It's a great day to get things done. What are we working on?",
+  "Hello! Ready when you are — what can I do for you?",
+];
+
+function pickWakeGreeting(): string {
+  return WAKE_GREETINGS[Math.floor(Math.random() * WAKE_GREETINGS.length)];
+}
 
 export type VoiceStatus = "idle" | "listening" | "recording" | "processing" | "speaking";
 
@@ -28,9 +48,9 @@ interface UseWakeWordVoiceResult {
   status: VoiceStatus;
   error: string | null;
   toggle: () => void;
-  /** What Bella heard on the most recent command — for a live-caption UI. Cleared at the start of the next recording. */
+  /** What Julie heard on the most recent command — for a live-caption UI. Cleared at the start of the next recording. */
   lastHeard: string | null;
-  /** The short spoken line Bella replied with on the most recent turn — for a live-caption UI. Cleared at the start of the next recording. */
+  /** The short spoken line Julie replied with on the most recent turn — for a live-caption UI. Cleared at the start of the next recording. */
   lastSpoken: string | null;
 }
 
@@ -79,7 +99,7 @@ async function playBlob(blob: Blob): Promise<void> {
  * for the whole clip, which was the single biggest source of "the reply
  * feels slow to start talking". Falls back to buffer-then-play if the
  * browser lacks MSE mp3 support. `isAborted` is polled between chunks so a
- * mid-stream "Bella" toggle-off stops playback promptly.
+ * mid-stream "Julie" toggle-off stops playback promptly.
  */
 async function playAudioResponse(response: Response, isAborted: () => boolean): Promise<void> {
   const canStream =
@@ -146,16 +166,22 @@ async function playAudioResponse(response: Response, isAborted: () => boolean): 
 }
 
 /**
- * Always-on "Bella" wake-word listener for hands-free engagement CRUD.
+ * Always-on "Julie" wake-word listener for hands-free engagement CRUD.
  *
- * Two-phase loop, both phases driven off the same mic permission grant:
+ * Three-phase loop, all phases driven off the same mic permission grant:
  * 1. A continuous browser SpeechRecognition session listens only for the
  *    wake word (free, local to the browser — no audio leaves the machine
  *    until the wake word fires).
- * 2. Once heard, it stops the recognizer and switches to a MediaRecorder
- *    capture of the actual command, auto-stopped by a lightweight
- *    RMS-based silence detector. That clip is the only audio sent to
- *    OpenAI, transcribed via the cheap gpt-4o-mini-transcribe model.
+ * 2. Once heard, it stops the recognizer, speaks a short friendly greeting
+ *    (see WAKE_GREETINGS), then switches to a MediaRecorder capture of the
+ *    actual command, auto-stopped by a lightweight RMS-based silence
+ *    detector. That clip is the only audio sent to OpenAI, transcribed via
+ *    the cheap gpt-4o-mini-transcribe model.
+ * 3. After speaking the reply, instead of dropping straight back to
+ *    wake-word-gated listening, it opens a follow-up recording window
+ *    (see FOLLOWUP_NO_SPEECH_TIMEOUT_MS) so a conversation with several
+ *    back-to-back commands doesn't need "Julie" repeated every time. Only
+ *    once that window passes with no speech does it fall back to phase 1.
  *
  * The transcript is handed off to `onCommand` (the caller's normal
  * chat-send path, so CRUD tool-calling is unchanged) — the caller resolves
@@ -206,12 +232,17 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
   const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordingStoppedRef = useRef(true);
+  // Set right before stopping a follow-up recording that never heard any
+  // speech, so mediaRecorder.onstop knows to discard the (silent) clip and
+  // drop back to wake-word listening instead of sending it off to be
+  // transcribed.
+  const abandonRecordingRef = useRef(false);
 
   // Tears down the per-recording-cycle machinery (analyser loop, timers,
   // the MediaRecorder itself) but deliberately leaves the mic stream open —
   // it's kept warm for the whole "enabled" session (see `prepareMicStream`)
   // so each new command recording can start instantly instead of paying a
-  // fresh getUserMedia device-negotiation delay every time "Bella" fires.
+  // fresh getUserMedia device-negotiation delay every time "Julie" fires.
   function cleanupRecordingArtifacts() {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -289,7 +320,7 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     };
     recognition.onerror = (event) => {
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        setError("Microphone access was denied — allow it in the browser's site settings to use Bella.");
+        setError("Microphone access was denied — allow it in the browser's site settings to use Julie.");
         stoppedRef.current = true;
         setEnabled(false);
         setStatus("idle");
@@ -300,7 +331,7 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
       if (stoppedRef.current) return;
       if (pendingActionRef.current === "record") {
         pendingActionRef.current = "none";
-        void beginRecording();
+        void greetThenRecord();
         return;
       }
       // The engine stops on its own after a period of silence even in
@@ -317,7 +348,33 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     }
   }
 
-  async function beginRecording() {
+  /**
+   * Speaks a short, friendly greeting the moment the wake word fires, then
+   * starts recording the actual command — the "hey, what's up?" beat that
+   * makes waking Julie feel like greeting a person instead of just arming a
+   * recorder.
+   */
+  async function greetThenRecord() {
+    if (stoppedRef.current) return;
+    const greeting = pickWakeGreeting();
+    setLastHeard(null);
+    setLastSpoken(greeting);
+    await speak(greeting);
+    if (stoppedRef.current) return;
+    await beginRecording("wake");
+  }
+
+  /**
+   * `mode: "wake"` is a command recorded right after the wake word/greeting
+   * — the user just asked for this, so it's worth waiting the full
+   * MAX_RECORD_MS for them to start talking. `mode: "followup"` is the
+   * post-reply "still listening" window opened without the wake word —
+   * since nobody explicitly asked for this one, it gives up much sooner
+   * (FOLLOWUP_NO_SPEECH_TIMEOUT_MS) if nothing is said, discarding the
+   * silent clip and falling back to wake-word-gated listening rather than
+   * paying a transcription round trip on dead air.
+   */
+  async function beginRecording(mode: "wake" | "followup") {
     if (stoppedRef.current) return;
     setStatus("recording");
     setLastHeard(null);
@@ -376,6 +433,11 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
             stopRecording();
             return;
           }
+          if (mode === "followup" && !hasSpoken && now - startedAt > FOLLOWUP_NO_SPEECH_TIMEOUT_MS) {
+            abandonRecordingRef.current = true;
+            stopRecording();
+            return;
+          }
           rafRef.current = requestAnimationFrame(monitor);
         };
         rafRef.current = requestAnimationFrame(monitor);
@@ -389,8 +451,14 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
       };
       mediaRecorder.onstop = () => {
         recordingStoppedRef.current = true;
-        const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType || "audio/webm" });
         cleanupRecordingArtifacts();
+        if (abandonRecordingRef.current) {
+          abandonRecordingRef.current = false;
+          chunksRef.current = [];
+          if (!stoppedRef.current) startListening();
+          return;
+        }
+        const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType || "audio/webm" });
         void handleRecordingComplete(blob);
       };
       mediaRecorderRef.current = mediaRecorder;
@@ -407,6 +475,11 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
   async function handleRecordingComplete(blob: Blob) {
     if (stoppedRef.current) return;
     setStatus("processing");
+    // Only a clean turn (transcribed, answered, spoken) earns the no-wake-word
+    // follow-up window below — an empty transcript or a failed turn instead
+    // drops straight back to wake-word-gated listening, so a transient error
+    // can't chain into a loop of doomed follow-up attempts.
+    let turnSucceeded = false;
     try {
       const text = (await transcribeVoice(blob)).trim();
       if (!text) return;
@@ -414,10 +487,17 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
       const reply = await onCommandRef.current(text);
       setLastSpoken(reply);
       await speak(reply);
+      turnSucceeded = true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong with that voice command.");
     } finally {
-      if (!stoppedRef.current) startListening();
+      if (!stoppedRef.current) {
+        if (turnSucceeded) {
+          void beginRecording("followup");
+        } else {
+          startListening();
+        }
+      }
     }
   }
 

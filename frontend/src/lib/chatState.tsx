@@ -26,7 +26,7 @@ interface ChatState {
   error: string | null;
   /** Runs one full chat turn against the persisted session and resolves
    * with a short spoken-friendly line (see buildSpokenReply) — shared by
-   * the Chat page's textarea and the global "Bella" voice control, so
+   * the Chat page's textarea and the global "Julie" voice control, so
    * either one can drive the same conversation from any page. */
   sendTurn: (text: string) => Promise<string>;
   handleNewChat: () => void;
