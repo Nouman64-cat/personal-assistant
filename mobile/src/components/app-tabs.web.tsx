@@ -1,6 +1,6 @@
 import type { Href } from 'expo-router';
 import { Tabs, TabList, TabTrigger, TabSlot, TabTriggerSlotProps, TabListProps } from 'expo-router/ui';
-import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
+import { Pressable, View, StyleSheet } from 'react-native';
 
 import { Icon, type IconName } from './icon';
 import { ThemedText } from './themed-text';
@@ -38,8 +38,7 @@ export function TabButton({
   icon,
   ...props
 }: TabTriggerSlotProps & { icon: IconName }) {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+  const colors = Colors.light;
 
   return (
     <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>

@@ -8,10 +8,12 @@ export const CATEGORY_LABELS: Record<EngagementCategory, string> = {
 };
 
 /** Solid accent color per category — used for the left border stripe on
- * engagement cards and category dots, mirroring the web app's palette. */
+ * engagement cards and category dots, mirroring the web app's palette
+ * (blue/violet rather than red — red is reserved for actual errors and
+ * destructive actions, not neutral category labels like "meeting"). */
 export const CATEGORY_COLORS: Record<EngagementCategory, string> = {
-  meeting: '#ef4444',
-  interview: '#f43f5e',
+  meeting: '#3b82f6',
+  interview: '#8b5cf6',
   office_hours: '#f97316',
   personal: '#0ea5e9',
 };

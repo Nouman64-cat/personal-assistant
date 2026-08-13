@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { EngagementCard } from '@/components/engagement-card';
+import { DayTimeline } from '@/components/day-timeline';
 import { EngagementFormModal } from '@/components/engagement-form-modal';
-import { Icon } from '@/components/icon';
+import { ErrorBanner } from '@/components/error-banner';
+import { Fab } from '@/components/fab';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Icon } from '@/components/icon';
 import { Spacing } from '@/constants/theme';
-import { ApiError, deleteEngagement, getFreeSlots, getShiftSettings, listEngagements } from '@/lib/api';
+import { ApiError, getFreeSlots, getShiftSettings, listEngagements } from '@/lib/api';
 import {
   addDays,
   formatClockTime,
@@ -21,7 +23,7 @@ import {
 import type { Engagement, FreeSlotItem, ShiftSettings } from '@/lib/types';
 import { useTheme } from '@/hooks/use-theme';
 
-type ModalState = { mode: 'create' } | { mode: 'edit'; engagement: Engagement };
+type ModalState = { mode: 'create'; start: Date; end: Date } | { mode: 'edit'; engagement: Engagement };
 
 const VISIBLE_DAYS = 7;
 
@@ -102,8 +104,17 @@ export default function CalendarScreen() {
     [engagements, selectedDate],
   );
 
-  function openCreate() {
-    setModalState({ mode: 'create' });
+  function openCreateForNow() {
+    const start = new Date(selectedDate);
+    const now = new Date();
+    if (isSameDay(selectedDate, now)) {
+      start.setHours(now.getHours() + 1, 0, 0, 0);
+    } else {
+      start.setHours(9, 0, 0, 0);
+    }
+    const end = new Date(start);
+    end.setHours(end.getHours() + 1);
+    setModalState({ mode: 'create', start, end });
   }
 
   function openEdit(engagement: Engagement) {
@@ -115,38 +126,12 @@ export default function CalendarScreen() {
     loadEngagements();
   }
 
-  function requestDelete(engagement: Engagement) {
-    Alert.alert('Delete engagement?', `Remove "${engagement.title}" from your calendar.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteEngagement(engagement.id);
-            loadEngagements();
-          } catch (caught) {
-            setError(caught instanceof ApiError ? caught.message : 'Failed to delete engagement.');
-          }
-        },
-      },
-    ]);
-  }
-
-  function createDefaultsForSelectedDay(): { start: Date; end: Date } {
-    const start = new Date(selectedDate);
-    const now = new Date();
-    if (isSameDay(selectedDate, now)) {
-      start.setHours(now.getHours() + 1, 0, 0, 0);
-    } else {
-      start.setHours(9, 0, 0, 0);
-    }
-    const end = new Date(start);
-    end.setHours(end.getHours() + 1);
-    return { start, end };
-  }
-
-  const createDefaults = modalState?.mode === 'create' ? createDefaultsForSelectedDay() : null;
+  const shiftWindow = useMemo(() => {
+    if (!shift) return null;
+    const [startHour, startMinute] = shift.day_start_hour.split(':').map(Number);
+    const [endHour, endMinute] = shift.day_end_hour.split(':').map(Number);
+    return { startMinutes: startHour * 60 + startMinute, endMinutes: endHour * 60 + endMinute };
+  }, [shift]);
 
   if (isLoading) {
     return (
@@ -160,9 +145,7 @@ export default function CalendarScreen() {
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
-          <ThemedText type="title" style={styles.title}>
-            Calendar
-          </ThemedText>
+          <ThemedText type="pageTitle">Calendar</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             Where you actually have time, and what&apos;s already booked.
           </ThemedText>
@@ -217,15 +200,9 @@ export default function CalendarScreen() {
           })}
         </View>
 
-        {error && (
-          <View style={[styles.errorBanner, { backgroundColor: theme.dangerBackground }]}>
-            <ThemedText type="small" style={{ color: theme.danger }}>
-              {error}
-            </ThemedText>
-          </View>
-        )}
+        {error && <ErrorBanner message={error} style={styles.errorBanner} />}
 
-        <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.slotSection}>
           <View style={styles.sectionHeaderRow}>
             <ThemedText type="smallBold" themeColor="textSecondary">
               FREE TODAY
@@ -242,58 +219,49 @@ export default function CalendarScreen() {
                 const start = new Date(slot.start_time);
                 const end = new Date(slot.end_time);
                 return (
-                  <View key={index} style={[styles.slotPill, { backgroundColor: theme.backgroundElement }]}>
+                  <Pressable
+                    key={index}
+                    onPress={() =>
+                      setModalState({
+                        mode: 'create',
+                        start,
+                        end: new Date(Math.min(start.getTime() + 60 * 60_000, end.getTime())),
+                      })
+                    }
+                    style={[styles.slotPill, { backgroundColor: theme.backgroundElement }]}>
                     <ThemedText type="small" style={{ color: theme.success, fontWeight: '600' }}>
                       {formatClockTime(start)} – {formatClockTime(end)}
                     </ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
                       {formatDuration(slot.duration_minutes)}
                     </ThemedText>
-                  </View>
+                  </Pressable>
                 );
               })}
             </ScrollView>
           )}
+        </View>
 
-          <View style={styles.sectionHeaderRow}>
-            <ThemedText type="smallBold" themeColor="textSecondary">
-              ENGAGEMENTS
-            </ThemedText>
-          </View>
-          {dayEngagements.length === 0 ? (
-            <View style={styles.emptyState}>
-              <ThemedText type="small" themeColor="textSecondary">
-                Nothing scheduled this day.
-              </ThemedText>
-            </View>
-          ) : (
-            <View style={styles.cardStack}>
-              {dayEngagements.map((engagement) => (
-                <EngagementCard
-                  key={engagement.id}
-                  engagement={engagement}
-                  onPress={() => openEdit(engagement)}
-                  onDelete={() => requestDelete(engagement)}
-                />
-              ))}
-            </View>
-          )}
-        </ScrollView>
+        <View style={[styles.timelineWrap, { borderTopColor: theme.border }]}>
+          <DayTimeline
+            day={selectedDate}
+            engagements={dayEngagements}
+            shiftWindow={shiftWindow}
+            onEngagementPress={openEdit}
+            onCreateAt={(start, end) => setModalState({ mode: 'create', start, end })}
+          />
+        </View>
 
-        <Pressable onPress={openCreate} style={[styles.fab, { backgroundColor: theme.tint }]} accessibilityLabel="Add engagement">
-          <Icon name="add" color="#ffffff" size={24} />
-        </Pressable>
+        <Fab onPress={openCreateForNow} />
       </SafeAreaView>
 
       {modalState && (
         <EngagementFormModal
-          key={modalState.mode === 'edit' ? modalState.engagement.id : `create-${toDateKey(selectedDate)}`}
+          key={modalState.mode === 'edit' ? modalState.engagement.id : `create-${modalState.start.toISOString()}`}
           visible
           mode={modalState.mode}
-          initialStart={
-            modalState.mode === 'edit' ? parseNaiveIso(modalState.engagement.start_time) : createDefaults!.start
-          }
-          initialEnd={modalState.mode === 'edit' ? parseNaiveIso(modalState.engagement.end_time) : createDefaults!.end}
+          initialStart={modalState.mode === 'edit' ? parseNaiveIso(modalState.engagement.start_time) : modalState.start}
+          initialEnd={modalState.mode === 'edit' ? parseNaiveIso(modalState.engagement.end_time) : modalState.end}
           initialTitle={modalState.mode === 'edit' ? modalState.engagement.title : undefined}
           initialDescription={modalState.mode === 'edit' ? modalState.engagement.description : undefined}
           initialCategory={modalState.mode === 'edit' ? modalState.engagement.category : undefined}
@@ -323,10 +291,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.two,
     gap: Spacing.half,
-  },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
   },
   weekNav: {
     flexDirection: 'row',
@@ -358,25 +322,21 @@ const styles = StyleSheet.create({
   errorBanner: {
     marginHorizontal: Spacing.four,
     marginBottom: Spacing.three,
-    padding: Spacing.three,
-    borderRadius: Spacing.two,
   },
-  content: {
+  slotSection: {
     paddingHorizontal: Spacing.four,
-    paddingBottom: 120,
-    gap: Spacing.two,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: Spacing.two,
+    marginBottom: Spacing.two,
   },
   noSlotsText: {
     marginBottom: Spacing.two,
   },
   slotRow: {
-    marginBottom: Spacing.two,
+    marginBottom: Spacing.one,
   },
   slotPill: {
     borderRadius: Spacing.two,
@@ -385,26 +345,9 @@ const styles = StyleSheet.create({
     marginRight: Spacing.two,
     alignItems: 'center',
   },
-  emptyState: {
-    paddingVertical: Spacing.four,
-    alignItems: 'center',
-  },
-  cardStack: {
-    gap: Spacing.two,
-  },
-  fab: {
-    position: 'absolute',
-    right: Spacing.four,
-    bottom: Spacing.four,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+  timelineWrap: {
+    flex: 1,
+    marginTop: Spacing.one,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
 });

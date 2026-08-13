@@ -1,5 +1,5 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
+ * The app's light-theme palette — this is the only theme, by design (see useTheme).
  * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
  */
 
@@ -21,22 +21,9 @@ export const Colors = {
     dangerBackground: '#FEF2F2',
     success: '#059669',
   },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-    tint: '#A78BFA',
-    tintSecondary: '#E879F9',
-    border: '#2E3135',
-    danger: '#F87171',
-    dangerBackground: '#3F1D1D',
-    success: '#34D399',
-  },
 } as const;
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+export type ThemeColor = keyof typeof Colors.light;
 
 export const Fonts = Platform.select({
   ios: {
@@ -75,3 +62,27 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/**
+ * Shared elevation presets. Flat fills read fine against a dark background,
+ * but on a plain white one they can look pasted-on rather than layered — a
+ * little shadow gives cards and floating controls real depth in light mode.
+ */
+export const Shadows = {
+  /** Resting elevation for cards sitting directly on the page background. */
+  card: {
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  /** Stronger elevation for controls that float above the content, like the FAB. */
+  raised: {
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+  },
+} as const;

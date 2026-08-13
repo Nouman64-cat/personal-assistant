@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/button';
 import { DateTimeField } from '@/components/date-time-field';
+import { ErrorBanner } from '@/components/error-banner';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Shadows, Spacing } from '@/constants/theme';
 import { formatClockTime } from '@/lib/dates';
 import { ApiError, getShiftSettings, updateShiftSettings } from '@/lib/api';
 import type { ShiftSettings } from '@/lib/types';
@@ -60,27 +61,27 @@ export default function SettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    getShiftSettings()
-      .then((data) => {
-        if (cancelled) return;
-        setShift(data);
-        setDayStartHour(toInputTime(data.day_start_hour));
-        setDayEndHour(toInputTime(data.day_end_hour));
-        setTimezone(data.timezone);
-        setBufferMinutes(data.buffer_minutes);
-      })
-      .catch((caught) => {
-        if (!cancelled) setError(caught instanceof ApiError ? caught.message : 'Failed to load shift settings.');
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await getShiftSettings();
+      setShift(data);
+      setDayStartHour(toInputTime(data.day_start_hour));
+      setDayEndHour(toInputTime(data.day_end_hour));
+      setTimezone(data.timezone);
+      setBufferMinutes(data.buffer_minutes);
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Failed to load shift settings.');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
 
   const rangeIsValid = dayStartHour !== dayEndHour;
   const isOvernight = dayStartHour > dayEndHour;
@@ -111,10 +112,19 @@ export default function SettingsScreen() {
     }
   }
 
-  if (isLoading || !shift) {
+  if (isLoading) {
     return (
       <ThemedView style={styles.centered}>
         <ActivityIndicator color={theme.tint} />
+      </ThemedView>
+    );
+  }
+
+  if (!shift) {
+    return (
+      <ThemedView style={styles.centered}>
+        <ErrorBanner message={error ?? 'Failed to load shift settings.'} style={styles.loadErrorBanner} />
+        <Button label="Retry" onPress={load} />
       </ThemedView>
     );
   }
@@ -124,9 +134,7 @@ export default function SettingsScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.header}>
-            <ThemedText type="title" style={styles.title}>
-              Shift Settings
-            </ThemedText>
+            <ThemedText type="pageTitle">Shift Settings</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               Your working hours — used to compute free slots and detect conflicts.
             </ThemedText>
@@ -230,13 +238,7 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          {error && (
-            <View style={[styles.errorBanner, { backgroundColor: theme.dangerBackground }]}>
-              <ThemedText type="small" style={{ color: theme.danger }}>
-                {error}
-              </ThemedText>
-            </View>
-          )}
+          {error && <ErrorBanner message={error} />}
 
           <Button
             label={justSaved ? 'Saved ✓' : 'Save shift'}
@@ -261,6 +263,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.four,
+  },
+  loadErrorBanner: {
+    alignSelf: 'stretch',
   },
   content: {
     paddingHorizontal: Spacing.four,
@@ -272,14 +279,11 @@ const styles = StyleSheet.create({
     gap: Spacing.half,
     marginBottom: Spacing.two,
   },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
-  },
   card: {
     borderRadius: Spacing.three,
     padding: Spacing.three,
     gap: Spacing.two,
+    ...Shadows.card,
   },
   cardHeaderRow: {
     flexDirection: 'row',
@@ -315,9 +319,5 @@ const styles = StyleSheet.create({
   stepperValue: {
     minWidth: 64,
     textAlign: 'center',
-  },
-  errorBanner: {
-    padding: Spacing.three,
-    borderRadius: Spacing.two,
   },
 });

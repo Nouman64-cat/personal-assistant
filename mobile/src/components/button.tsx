@@ -19,14 +19,12 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading 
   const isDisabled = disabled || loading;
 
   const backgroundColor =
-    variant === 'primary'
-      ? theme.tint
-      : variant === 'danger'
-        ? theme.dangerBackground
-        : variant === 'secondary'
-          ? theme.backgroundElement
-          : 'transparent';
-  const textColor = variant === 'primary' ? '#ffffff' : variant === 'danger' ? theme.danger : theme.text;
+    variant === 'primary' || variant === 'danger'
+      ? theme[variant === 'primary' ? 'tint' : 'danger']
+      : variant === 'secondary'
+        ? theme.backgroundElement
+        : 'transparent';
+  const textColor = variant === 'primary' || variant === 'danger' ? '#ffffff' : theme.text;
 
   return (
     <Pressable

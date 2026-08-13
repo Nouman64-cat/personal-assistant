@@ -4,7 +4,7 @@ import { CategoryPill } from '@/components/category-pill';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { CATEGORY_COLORS } from '@/constants/engagements';
-import { Spacing } from '@/constants/theme';
+import { Shadows, Spacing } from '@/constants/theme';
 import { formatClockTime, formatDayLabel, parseNaiveIso } from '@/lib/dates';
 import type { Engagement } from '@/lib/types';
 import { useTheme } from '@/hooks/use-theme';
@@ -22,32 +22,29 @@ export function EngagementCard({ engagement, onPress, onDelete }: EngagementCard
   const accent = CATEGORY_COLORS[engagement.category];
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        { backgroundColor: theme.backgroundElement, opacity: pressed ? 0.8 : 1 },
-      ]}>
-      <View style={[styles.accentBar, { backgroundColor: accent }]} />
-      <View style={styles.body}>
-        <View style={styles.headerRow}>
-          <ThemedText type="smallBold" numberOfLines={1} style={styles.title}>
-            {engagement.title}
-          </ThemedText>
-          <Pressable hitSlop={10} onPress={onDelete}>
-            <Icon name="trash" color={theme.danger} size={16} />
-          </Pressable>
-        </View>
-        <ThemedText type="small" themeColor="textSecondary">
-          {formatDayLabel(start)} · {formatClockTime(start)} – {formatClockTime(end)}
-        </ThemedText>
-        <View style={styles.footerRow}>
-          <CategoryPill category={engagement.category} />
-          {!engagement.is_blocking && (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.reminderNote}>
-              Reminder only
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.shadowWrap, { opacity: pressed ? 0.8 : 1 }]}>
+      <View style={[styles.card, { backgroundColor: theme.backgroundElement }]}>
+        <View style={[styles.accentBar, { backgroundColor: accent }]} />
+        <View style={styles.body}>
+          <View style={styles.headerRow}>
+            <ThemedText type="smallBold" numberOfLines={1} style={styles.title}>
+              {engagement.title}
             </ThemedText>
-          )}
+            <Pressable hitSlop={10} onPress={onDelete}>
+              <Icon name="trash" color={theme.danger} size={16} />
+            </Pressable>
+          </View>
+          <ThemedText type="small" themeColor="textSecondary">
+            {formatDayLabel(start)} · {formatClockTime(start)} – {formatClockTime(end)}
+          </ThemedText>
+          <View style={styles.footerRow}>
+            <CategoryPill category={engagement.category} />
+            {!engagement.is_blocking && (
+              <ThemedText type="small" themeColor="textSecondary" style={styles.reminderNote}>
+                Reminder only
+              </ThemedText>
+            )}
+          </View>
         </View>
       </View>
     </Pressable>
@@ -55,6 +52,13 @@ export function EngagementCard({ engagement, onPress, onDelete }: EngagementCard
 }
 
 const styles = StyleSheet.create({
+  // Shadow lives on this outer, non-clipping wrapper — `card` below needs
+  // `overflow: hidden` to keep the accent bar's corners rounded, and iOS
+  // silently drops a shadow on any view that also clips its own overflow.
+  shadowWrap: {
+    borderRadius: Spacing.three,
+    ...Shadows.card,
+  },
   card: {
     flexDirection: 'row',
     borderRadius: Spacing.three,

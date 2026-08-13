@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, RefreshControl, SectionList, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, RefreshControl, SectionList, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EngagementCard } from '@/components/engagement-card';
 import { EngagementFormModal } from '@/components/engagement-form-modal';
+import { ErrorBanner } from '@/components/error-banner';
+import { Fab } from '@/components/fab';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -119,9 +121,7 @@ export default function EngagementsScreen() {
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
-          <ThemedText type="title" style={styles.title}>
-            Engagements
-          </ThemedText>
+          <ThemedText type="pageTitle">Engagements</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             Everything on your calendar, past and upcoming.
           </ThemedText>
@@ -138,13 +138,7 @@ export default function EngagementsScreen() {
           />
         </View>
 
-        {error && (
-          <View style={[styles.errorBanner, { backgroundColor: theme.dangerBackground }]}>
-            <ThemedText type="small" style={{ color: theme.danger }}>
-              {error}
-            </ThemedText>
-          </View>
-        )}
+        {error && <ErrorBanner message={error} style={styles.errorBanner} />}
 
         <SectionList
           sections={sections}
@@ -174,12 +168,7 @@ export default function EngagementsScreen() {
           }
         />
 
-        <Pressable
-          onPress={openCreate}
-          style={[styles.fab, { backgroundColor: theme.tint }]}
-          accessibilityLabel="Add engagement">
-          <Icon name="add" color="#ffffff" size={24} />
-        </Pressable>
+        <Fab onPress={openCreate} />
       </SafeAreaView>
 
       {modalState && (
@@ -232,10 +221,6 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.three,
     gap: Spacing.half,
   },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
-  },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -253,8 +238,6 @@ const styles = StyleSheet.create({
   errorBanner: {
     marginHorizontal: Spacing.four,
     marginBottom: Spacing.three,
-    padding: Spacing.three,
-    borderRadius: Spacing.two,
   },
   listContent: {
     paddingHorizontal: Spacing.four,
@@ -269,20 +252,5 @@ const styles = StyleSheet.create({
   emptyState: {
     paddingTop: Spacing.six,
     alignItems: 'center',
-  },
-  fab: {
-    position: 'absolute',
-    right: Spacing.four,
-    bottom: Spacing.four,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
   },
 });

@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ChatBubble, type DisplayMessage } from '@/components/chat-bubble';
+import { ErrorBanner } from '@/components/error-banner';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -177,9 +178,7 @@ export default function ChatScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
           <View>
-            <ThemedText type="title" style={styles.title}>
-              Chat
-            </ThemedText>
+            <ThemedText type="pageTitle">Chat</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               Tell it what to schedule, move, or cancel — or tap the mic.
             </ThemedText>
@@ -238,20 +237,8 @@ export default function ChatScreen() {
             />
           )}
 
-          {error && (
-            <View style={[styles.errorBanner, { backgroundColor: theme.dangerBackground }]}>
-              <ThemedText type="small" style={{ color: theme.danger }}>
-                {error}
-              </ThemedText>
-            </View>
-          )}
-          {voice.error && (
-            <View style={[styles.errorBanner, { backgroundColor: theme.dangerBackground }]}>
-              <ThemedText type="small" style={{ color: theme.danger }}>
-                {voice.error}
-              </ThemedText>
-            </View>
-          )}
+          {error && <ErrorBanner message={error} style={styles.errorBanner} />}
+          {voice.error && <ErrorBanner message={voice.error} style={styles.errorBanner} />}
 
           {voiceActive ? (
             <View style={[styles.voiceRow, { borderTopColor: theme.border, backgroundColor: theme.backgroundElement }]}>
@@ -327,10 +314,6 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
     paddingBottom: Spacing.three,
   },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
-  },
   centered: {
     flex: 1,
     alignItems: 'center',
@@ -377,8 +360,6 @@ const styles = StyleSheet.create({
   errorBanner: {
     marginHorizontal: Spacing.four,
     marginBottom: Spacing.two,
-    padding: Spacing.three,
-    borderRadius: Spacing.two,
   },
   inputRow: {
     flexDirection: 'row',

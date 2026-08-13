@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/button';
 import { DateTimeField } from '@/components/date-time-field';
+import { ErrorBanner } from '@/components/error-banner';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_OPTIONS } from '@/constants/engagements';
@@ -236,13 +237,7 @@ export function EngagementFormModal({
             <Switch value={isBlocking} onValueChange={setIsBlocking} trackColor={{ true: theme.tint }} />
           </View>
 
-          {error && (
-            <View style={[styles.errorBanner, { backgroundColor: theme.dangerBackground }]}>
-              <ThemedText type="small" style={{ color: theme.danger }}>
-                {error}
-              </ThemedText>
-            </View>
-          )}
+          {error && <ErrorBanner message={error} />}
 
           <View style={styles.actions}>
             {mode === 'edit' && (
@@ -319,10 +314,6 @@ const styles = StyleSheet.create({
   switchLabel: {
     flex: 1,
     gap: 2,
-  },
-  errorBanner: {
-    borderRadius: Spacing.two,
-    padding: Spacing.three,
   },
   actions: {
     gap: Spacing.two,
