@@ -57,10 +57,12 @@ export function EngagementAlarmProvider({ children }: { children: React.ReactNod
       // Only care about engagements starting in the next 15 min, not already started.
       if (start <= now || start > soon) continue;
 
-      // Build a stable alarm key: ID + the minute bucket (so a 10-min-away alarm
-      // doesn't re-fire every time the interval ticks).
+      // The alarm key is just the engagement ID — one alarm per engagement,
+      // fired once the first time it enters the 15-minute window and never
+      // again. Using `id-minutesUntil` caused a new key every minute as the
+      // countdown ticked down, re-firing the alarm on every poll cycle.
       const minutesUntil = Math.round((start.getTime() - now.getTime()) / 60_000);
-      const alarmKey = `${engagement.id}-${minutesUntil}`;
+      const alarmKey = engagement.id;
 
       // Check both the in-memory set and sessionStorage (survives fast-refresh).
       const storedFired: string[] = JSON.parse(sessionStorage.getItem(FIRED_KEY) ?? "[]");
