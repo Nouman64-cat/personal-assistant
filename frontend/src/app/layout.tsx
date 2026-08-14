@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 import AppHeader from "@/components/AppHeader";
+import { EngagementAlarmProvider } from "@/components/EngagementAlarmProvider";
 import MobileNav from "@/components/MobileNav";
 import Sidebar from "@/components/Sidebar";
 import { AppStateProvider } from "@/lib/appState";
@@ -32,16 +33,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="h-full overflow-hidden">
         <AppStateProvider>
           <ChatStateProvider>
-            <div className="flex h-full flex-col md:flex-row">
-              <Sidebar />
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <AppHeader />
-                <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
-                  {children}
-                </main>
+            <EngagementAlarmProvider>
+              <div className="flex h-full flex-col md:flex-row">
+                <Sidebar />
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <AppHeader />
+                  <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
+                    {children}
+                  </main>
+                </div>
+                <MobileNav />
               </div>
-              <MobileNav />
-            </div>
+            </EngagementAlarmProvider>
           </ChatStateProvider>
         </AppStateProvider>
       </body>
