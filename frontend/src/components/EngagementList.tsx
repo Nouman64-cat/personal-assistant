@@ -186,10 +186,17 @@ export default function EngagementList({
           "flex items-stretch gap-2.5 overflow-hidden rounded-xl border transition",
           isHappeningNow
             ? "border-teal-300 bg-teal-50/60 dark:border-teal-800 dark:bg-teal-500/5"
-            : "border-zinc-200 dark:border-zinc-800",
+            : isDone
+              ? "border-zinc-100 bg-zinc-50/80 opacity-70 dark:border-zinc-800/50 dark:bg-zinc-800/30"
+              : "border-zinc-200 dark:border-zinc-800",
         )}
       >
-        <span className={cn("w-1 shrink-0 rounded-full my-2", CATEGORY_BLOCK_CLASSES[engagement.category])} />
+        <span
+          className={cn(
+            "w-1 shrink-0 rounded-full my-2",
+            isDone ? "bg-zinc-300 dark:bg-zinc-600" : CATEGORY_BLOCK_CLASSES[engagement.category],
+          )}
+        />
         <button
           type="button"
           onClick={() => onSelectDate?.(toDateKey(start))}
@@ -197,7 +204,14 @@ export default function EngagementList({
           title="Jump to this date on the calendar"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-medium text-zinc-900 hover:underline dark:text-zinc-50">
+            <span
+              className={cn(
+                "truncate text-sm font-medium hover:underline",
+                isDone
+                  ? "text-zinc-400 line-through dark:text-zinc-500"
+                  : "text-zinc-900 dark:text-zinc-50",
+              )}
+            >
               {engagement.title}
             </span>
             <span

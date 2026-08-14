@@ -1044,6 +1044,7 @@ function DayColumn({
           // enough for two lines, a single combined line for short (e.g.
           // 30min) meetings, or title-only when there's no room for either.
           const blockPx = (heightPct / 100) * GRID_HEIGHT_PX;
+          const isDone = parseNaiveIso(engagement.end_time) < new Date();
           return (
             <button
               key={engagement.id}
@@ -1052,8 +1053,13 @@ function DayColumn({
                 event.stopPropagation();
                 onEngagementClick?.(engagement);
               }}
-              title={`${engagement.title} — ${CATEGORY_LABELS[engagement.category]} (${timeRange}) — click to edit`}
-              className={`absolute z-20 overflow-hidden rounded-md px-1.5 py-0.5 text-left text-[11px] font-medium text-white transition hover:brightness-110 ${CATEGORY_BLOCK_CLASSES[engagement.category]}`}
+              title={`${engagement.title} — ${CATEGORY_LABELS[engagement.category]} (${timeRange})${isDone ? " ✓ Done" : ""} — click to edit`}
+              className={cn(
+                "absolute z-20 overflow-hidden rounded-md px-1.5 py-0.5 text-left text-[11px] font-medium transition",
+                isDone
+                  ? "bg-zinc-300 text-zinc-500 opacity-60 dark:bg-zinc-600 dark:text-zinc-400"
+                  : `text-white hover:brightness-110 ${CATEGORY_BLOCK_CLASSES[engagement.category]}`,
+              )}
               style={{
                 top: `${topPct}%`,
                 height: `${heightPct}%`,
@@ -1063,13 +1069,18 @@ function DayColumn({
             >
               {blockPx >= 32 ? (
                 <>
-                  <span className="block truncate">{engagement.title}</span>
-                  <span className="block truncate text-[10px] text-white/80">{timeRange}</span>
+                  <span className={cn("block truncate", isDone && "line-through")}>
+                    {isDone && blockPx >= 20 && (
+                      <span className="mr-0.5 inline-block">✓</span>
+                    )}
+                    {engagement.title}
+                  </span>
+                  <span className="block truncate text-[10px] opacity-70">{timeRange}</span>
                 </>
               ) : (
-                <span className="block truncate">
+                <span className={cn("block truncate", isDone && "line-through")}>
                   {engagement.title}
-                  {blockPx >= 14 && <span className="text-white/80"> · {timeRange}</span>}
+                  {blockPx >= 14 && <span className="opacity-70"> · {timeRange}</span>}
                 </span>
               )}
             </button>
