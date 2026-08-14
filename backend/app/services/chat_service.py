@@ -351,7 +351,33 @@ TOOLS = [
 ]
 
 
-def _build_system_prompt(reference_datetime: datetime, timezone_name: str) -> str:
+def _build_system_prompt(
+    reference_datetime: datetime,
+    timezone_name: str,
+    shift: Optional["ShiftSettings"] = None,
+) -> str:
+    # Build a human-readable description of the user's configured shift so
+    # the model knows what "my shift" means and can call list_engagements with
+    # correct date-range bounds when asked for "today's schedule".
+    if shift is not None:
+        def _fmt_time(t: "dt_time") -> str:
+            """Format a time object as a friendly '9:00 AM' string."""
+            hour, minute = t.hour, t.minute
+            suffix = "AM" if hour < 12 else "PM"
+            display_hour = hour % 12 or 12
+            return f"{display_hour}:{minute:02d} {suffix}"
+
+        shift_info = (
+            f"The user's configured working shift runs from {_fmt_time(shift.day_start_hour)} "
+            f"to {_fmt_time(shift.day_end_hour)} in the {shift.timezone} timezone. "
+            f"Whenever the user asks about 'today's schedule', 'my shift today', or anything "
+            f"implying their working-hours window, use list_engagements with start_after set to "
+            f"the start of that shift window and start_before to the end of it (both on today's "
+            f"date in {shift.timezone}) — never say there are no shifts when a shift is configured."
+        )
+    else:
+        shift_info = "No working shift is configured yet."
+
     return (
         "You are a scheduling assistant that manages the user's calendar through natural "
         "conversation. Use the provided tools to create, edit, delete, and look up engagements, "
@@ -434,6 +460,7 @@ def _build_system_prompt(reference_datetime: datetime, timezone_name: str) -> st
         "yourself. If check_availability instead returns available: true, the app still renders "
         "that day's schedule as a widget confirming it — just state plainly, in one sentence, that "
         "the requested time is free; don't itemize the day's other engagements yourself.\n\n"
+        f"Working shift: {shift_info}\n\n"
         f"Reference datetime (the user's current local time), treat this as 'now': "
         f"{reference_datetime.isoformat()} ({timezone_name})."
     )
@@ -975,9 +1002,16 @@ def send_message(
     session.commit()
 
     client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+
+    # Load the user's shift settings so the system prompt can tell the model
+    # what hours constitute "my shift" — without this the model has no way to
+    # interpret requests like "today's schedule of my shift".
+    from app.services.settings_service import get_or_create_shift_settings as _get_shift
+    shift = _get_shift(session)
+
     system_message = {
         "role": "system",
-        "content": _build_system_prompt(reference_datetime, timezone_name),
+        "content": _build_system_prompt(reference_datetime, timezone_name, shift),
     }
 
     actions: List[EngagementAction] = []
