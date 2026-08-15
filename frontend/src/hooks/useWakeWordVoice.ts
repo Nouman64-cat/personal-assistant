@@ -41,7 +41,7 @@ interface UseWakeWordVoiceOptions {
   onCommand: (text: string) => Promise<string>;
 }
 
-interface UseWakeWordVoiceResult {
+export interface UseWakeWordVoiceResult {
   /** False when the browser has neither SpeechRecognition nor MediaRecorder — Chrome/Edge only. */
   supported: boolean;
   enabled: boolean;

@@ -103,3 +103,43 @@ body {
 .animate-alarm-bell {
   animation: alarm-bell 0.55s ease-in-out;
 }
+
+/* JulieFace fullscreen takeover: blinking eyes, a gentle idle float, and a
+   head-tilt used while she's "thinking" between hearing you and replying. */
+@keyframes eye-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  93%, 96% { transform: scaleY(0.08); }
+}
+.animate-eye-blink {
+  animation: eye-blink 4.5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes eye-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.animate-eye-float {
+  animation: eye-float 3.6s ease-in-out infinite;
+}
+
+/* Combines the idle float with a rotate — applied instead of, not alongside,
+   `animate-eye-float` since stacking two `animation`-setting classes on one
+   element makes the second silently override the first rather than merge. */
+@keyframes head-tilt {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-8px) rotate(3deg); }
+}
+.animate-head-tilt {
+  animation: head-tilt 2.4s ease-in-out infinite;
+}
+
+/* JulieFace widget card: slides/fades in from the side she's turned toward
+   when a reply carries a calendar widget (booking, free slots, a lookup). */
+@keyframes widget-slide-in {
+  from { opacity: 0; transform: translateX(16px) scale(0.97); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+.animate-widget-slide-in {
+  animation: widget-slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}

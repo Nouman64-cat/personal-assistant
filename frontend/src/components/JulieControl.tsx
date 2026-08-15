@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Mic, MicOff, X } from "lucide-react";
 
-import { useWakeWordVoice, type VoiceStatus } from "@/hooks/useWakeWordVoice";
-import { useChatState } from "@/lib/chatState";
+import type { VoiceStatus } from "@/hooks/useWakeWordVoice";
+import { useVoiceState } from "@/lib/voiceState";
 import { cn } from "@/lib/utils";
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -43,8 +43,7 @@ function EqualizerBars({ tone }: { tone: "rose" | "emerald" | "white" }) {
 }
 
 export default function JulieControl() {
-  const { sendTurn } = useChatState();
-  const voice = useWakeWordVoice({ onCommand: sendTurn });
+  const voice = useVoiceState();
   const [captionVisible, setCaptionVisible] = useState(false);
   const [errorDismissed, setErrorDismissed] = useState(false);
 
