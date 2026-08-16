@@ -6,6 +6,7 @@ import { Bell, X, Clock, CalendarClock, BellRing } from "lucide-react";
 import type { Engagement } from "@/lib/types";
 import { CATEGORY_BADGE_CLASSES, CATEGORY_LABELS, cn, formatTime } from "@/lib/utils";
 import { speakJulie, type SpeakHandle } from "@/lib/julieSpeak";
+import { useVoiceState } from "@/lib/voiceState";
 
 export interface AlarmToastData {
   engagement: Engagement;
@@ -51,10 +52,13 @@ export function EngagementAlarmToast({ alarm, onDismiss }: EngagementAlarmToastP
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [ringing, setRinging] = useState(false);
+  const [listeningAfterAlarm, setListeningAfterAlarm] = useState(false);
   const speakHandleRef = useRef<SpeakHandle | null>(null);
   const repeatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dismissedRef = useRef(false);
+  const isFirstSpeakRef = useRef(true);
   const { engagement, minutesUntil } = alarm;
+  const voice = useVoiceState();
 
   // Entrance animation
   useEffect(() => {
@@ -64,6 +68,8 @@ export function EngagementAlarmToast({ alarm, onDismiss }: EngagementAlarmToastP
 
   // Recurring Julie voice alarm — speak immediately, then repeat after a
   // pause once she finishes, until the user dismisses the toast.
+  // After the FIRST speak completes, immediately open a voice recording
+  // window so the user can reply without saying the wake word.
   useEffect(() => {
     async function scheduleSpeak() {
       if (dismissedRef.current) return;
@@ -79,8 +85,21 @@ export function EngagementAlarmToast({ alarm, onDismiss }: EngagementAlarmToastP
 
       if (dismissedRef.current) return;
 
+      // After the first alarm speech, open a listening window so the user
+      // can respond immediately without saying "Julie".
+      if (isFirstSpeakRef.current && voice.enabled) {
+        isFirstSpeakRef.current = false;
+        setListeningAfterAlarm(true);
+        voice.listenForCommand();
+        // Clear the indicator once voice transitions away from recording.
+        // We watch status in a separate effect below.
+      } else {
+        isFirstSpeakRef.current = false;
+      }
+
       // Wait a moment, then speak again.
       repeatTimerRef.current = setTimeout(() => {
+        setListeningAfterAlarm(false);
         void scheduleSpeak();
       }, REPEAT_PAUSE_MS);
     }
@@ -96,6 +115,14 @@ export function EngagementAlarmToast({ alarm, onDismiss }: EngagementAlarmToastP
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Clear the "listening" indicator once the voice hook moves out of recording/processing.
+  useEffect(() => {
+    if (listeningAfterAlarm && voice.status !== "recording" && voice.status !== "processing") {
+      setListeningAfterAlarm(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.status]);
 
   function dismiss() {
     dismissedRef.current = true;
@@ -174,6 +201,12 @@ export function EngagementAlarmToast({ alarm, onDismiss }: EngagementAlarmToastP
                     />
                   ))}
                   <span>Julie is speaking…</span>
+                </p>
+              )}
+              {listeningAfterAlarm && !ringing && (
+                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-violet-500 dark:text-violet-400">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-violet-500" />
+                  <span>Listening… go ahead</span>
                 </p>
               )}
             </div>

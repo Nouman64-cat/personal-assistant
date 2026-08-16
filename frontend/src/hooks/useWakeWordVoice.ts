@@ -58,6 +58,15 @@ export interface UseWakeWordVoiceResult {
   lastHeard: string | null;
   /** The short spoken line Julie replied with on the most recent turn — for a live-caption UI. Cleared at the start of the next recording. */
   lastSpoken: string | null;
+  /**
+   * Externally trigger a recording window — equivalent to saying "Julie" but
+   * skipping the wake-word gate. Used by the alarm toast so the user can reply
+   * immediately after Julie announces an upcoming engagement.
+   *
+   * No-ops when voice isn't enabled, or when the hook is already recording /
+   * processing / speaking.
+   */
+  listenForCommand: () => void;
 }
 
 function getSpeechRecognitionCtor(): (new () => SpeechRecognition) | null {
@@ -661,5 +670,22 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     setEnabled((previous) => !previous);
   }, []);
 
-  return { supported, enabled, status, error, toggle, lastHeard, lastSpoken };
+  /**
+   * Externally trigger a recording window — same as the post-reply follow-up,
+   * but initiated from outside the hook (e.g. after the alarm toast finishes
+   * speaking). Guards against calling when already busy.
+   */
+  const listenForCommand = useCallback(() => {
+    if (stoppedRef.current) return;
+    const currentStatus = status;
+    if (currentStatus === "recording" || currentStatus === "processing" || currentStatus === "speaking") return;
+    // Stop the SpeechRecognition wake-word loop so it doesn't fight the
+    // MediaRecorder (they can't share the mic on some browsers).
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    void beginRecording("followup");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  return { supported, enabled, status, error, toggle, lastHeard, lastSpoken, listenForCommand };
 }
