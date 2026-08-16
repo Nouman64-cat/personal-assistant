@@ -695,7 +695,7 @@ function MonthGrid({ monthCursor, daySummaries, shiftMinutes, onSelectDay }: Mon
                   {day.getDate()}
                 </span>
                 {inCurrentMonth && isWeekend && (
-                  <span className="text-[8px] font-semibold uppercase tracking-wide text-amber-500/90 dark:text-amber-400/80">
+                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
                     Off
                   </span>
                 )}

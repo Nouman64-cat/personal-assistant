@@ -18,8 +18,14 @@ const VOICE_RMS_THRESHOLD = 0.02;
  * command — no need to repeat the wake word — for this long. If nobody's
  * said anything by the time this elapses, that counts as "long inactivity"
  * and she drops back to wake-word-gated listening to save the round trip.
+ * Kept generous — this window closing silently is what makes a multi-turn
+ * conversation feel like it randomly stopped working.
  */
-const FOLLOWUP_NO_SPEECH_TIMEOUT_MS = 12_000;
+const FOLLOWUP_NO_SPEECH_TIMEOUT_MS = 20_000;
+/** RMS (0..1) above which mic input during playback counts as the user talking over Julie, not echo bleeding back through the speaker. Set above VOICE_RMS_THRESHOLD since an un-cancelled sliver of her own voice is louder than typical background noise. */
+const BARGE_IN_RMS_THRESHOLD = 0.035;
+/** Consecutive loud analyser frames required before treating mic input during playback as a real interruption rather than a stray click or echo pop. */
+const BARGE_IN_CONSECUTIVE_FRAMES = 4;
 
 /** Warm, energetic openers spoken the moment the wake word fires — picked at random so it doesn't feel like a canned response every time. */
 const WAKE_GREETINGS = [
@@ -82,14 +88,16 @@ function appendToSourceBuffer(sourceBuffer: SourceBuffer, chunk: Uint8Array): Pr
   });
 }
 
-async function playBlob(blob: Blob): Promise<void> {
+async function playBlob(blob: Blob, onAudioElement: (audio: HTMLAudioElement | null) => void): Promise<void> {
   const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  onAudioElement(audio);
   await new Promise<void>((resolve) => {
-    const audio = new Audio(url);
     audio.onended = () => resolve();
     audio.onerror = () => resolve();
     audio.play().catch(() => resolve());
   });
+  onAudioElement(null);
   URL.revokeObjectURL(url);
 }
 
@@ -101,20 +109,25 @@ async function playBlob(blob: Blob): Promise<void> {
  * browser lacks MSE mp3 support. `isAborted` is polled between chunks so a
  * mid-stream "Julie" toggle-off stops playback promptly.
  */
-async function playAudioResponse(response: Response, isAborted: () => boolean): Promise<void> {
+async function playAudioResponse(
+  response: Response,
+  isAborted: () => boolean,
+  onAudioElement: (audio: HTMLAudioElement | null) => void,
+): Promise<void> {
   const canStream =
     typeof MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg") && response.body !== null;
 
   if (!canStream) {
     const blob = await response.blob();
     if (isAborted()) return;
-    await playBlob(blob);
+    await playBlob(blob, onAudioElement);
     return;
   }
 
   const mediaSource = new MediaSource();
   const objectUrl = URL.createObjectURL(mediaSource);
   const audio = new Audio(objectUrl);
+  onAudioElement(audio);
   const donePromise = new Promise<void>((resolve) => {
     audio.onended = () => resolve();
     audio.onerror = () => resolve();
@@ -157,11 +170,13 @@ async function playAudioResponse(response: Response, isAborted: () => boolean): 
 
   if (isAborted()) {
     audio.pause();
+    onAudioElement(null);
     URL.revokeObjectURL(objectUrl);
     return;
   }
 
   await donePromise;
+  onAudioElement(null);
   URL.revokeObjectURL(objectUrl);
 }
 
@@ -179,9 +194,18 @@ async function playAudioResponse(response: Response, isAborted: () => boolean): 
  *    the cheap gpt-4o-mini-transcribe model.
  * 3. After speaking the reply, instead of dropping straight back to
  *    wake-word-gated listening, it opens a follow-up recording window
- *    (see FOLLOWUP_NO_SPEECH_TIMEOUT_MS) so a conversation with several
- *    back-to-back commands doesn't need "Julie" repeated every time. Only
- *    once that window passes with no speech does it fall back to phase 1.
+ *    (see FOLLOWUP_NO_SPEECH_TIMEOUT_MS, with a short chime marking when it
+ *    opens) so a conversation with several back-to-back commands doesn't
+ *    need "Julie" repeated every time. Only once that window passes with no
+ *    speech does it fall back to phase 1. This window opens after *any*
+ *    turn, including a failed one — a transient transcription/network error
+ *    shouldn't force the user to say the wake word again.
+ * 4. While a reply is being spoken (phase 2/3's TTS playback), the warm mic
+ *    stream is also monitored for barge-in: if the user starts talking over
+ *    Julie, playback is cut and a command recording starts immediately,
+ *    same as phase 2's post-greeting recording. Relies on the browser's
+ *    default echo cancellation to keep Julie's own voice from
+ *    self-triggering this (see BARGE_IN_RMS_THRESHOLD).
  *
  * The transcript is handed off to `onCommand` (the caller's normal
  * chat-send path, so CRUD tool-calling is unchanged) — the caller resolves
@@ -237,6 +261,17 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
   // drop back to wake-word listening instead of sending it off to be
   // transcribed.
   const abandonRecordingRef = useRef(false);
+  // The `<audio>` element currently playing a reply, if any — kept as a ref
+  // (not state) so the barge-in monitor's animation-frame loop can pause it
+  // synchronously the instant it hears the user start talking.
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Flipped by the barge-in monitor when it detects the user talking over a
+  // reply; checked by playAudioResponse's isAborted() poll and by speak()'s
+  // caller to skip straight into a new command recording instead of the
+  // normal followup window.
+  const interruptedRef = useRef(false);
+  const bargeInAudioContextRef = useRef<AudioContext | null>(null);
+  const bargeInRafRef = useRef<number | null>(null);
 
   // Tears down the per-recording-cycle machinery (analyser loop, timers,
   // the MediaRecorder itself) but deliberately leaves the mic stream open —
@@ -286,6 +321,9 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
       }
     }
     cleanupRecordingArtifacts();
+    stopBargeInMonitor();
+    currentAudioRef.current?.pause();
+    currentAudioRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }
@@ -294,6 +332,82 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
+  }
+
+  function stopBargeInMonitor() {
+    if (bargeInRafRef.current !== null) {
+      cancelAnimationFrame(bargeInRafRef.current);
+      bargeInRafRef.current = null;
+    }
+    void bargeInAudioContextRef.current?.close().catch(() => {});
+    bargeInAudioContextRef.current = null;
+  }
+
+  /**
+   * Watches the warm mic stream while a reply is playing so the user can
+   * talk over Julie instead of waiting her out. Requires a few consecutive
+   * loud analyser frames (not just one) before treating it as a real
+   * interruption — a single frame is too easy to trip on a click/pop or a
+   * bit of Julie's own voice slipping past the browser's echo cancellation.
+   * No-ops (playback just runs to completion) if there's no warm stream yet
+   * or the browser lacks AudioContext.
+   */
+  function startBargeInMonitor() {
+    const stream = streamRef.current;
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!stream || !AudioContextCtor) return;
+
+    const audioContext = new AudioContextCtor();
+    bargeInAudioContextRef.current = audioContext;
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+
+    const data = new Uint8Array(analyser.fftSize);
+    let consecutiveLoudFrames = 0;
+
+    const monitor = () => {
+      if (interruptedRef.current || stoppedRef.current) return;
+      analyser.getByteTimeDomainData(data);
+      let sumSquares = 0;
+      for (let i = 0; i < data.length; i++) {
+        const normalized = (data[i] - 128) / 128;
+        sumSquares += normalized * normalized;
+      }
+      const rms = Math.sqrt(sumSquares / data.length);
+      consecutiveLoudFrames = rms > BARGE_IN_RMS_THRESHOLD ? consecutiveLoudFrames + 1 : 0;
+      if (consecutiveLoudFrames >= BARGE_IN_CONSECUTIVE_FRAMES) {
+        interruptedRef.current = true;
+        currentAudioRef.current?.pause();
+        return;
+      }
+      bargeInRafRef.current = requestAnimationFrame(monitor);
+    };
+    bargeInRafRef.current = requestAnimationFrame(monitor);
+  }
+
+  /** Short two-decay tone marking the moment the post-reply follow-up window opens, so "still listening" is audible instead of a guess. */
+  function playListeningChime() {
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+    const ctx = new AudioContextCtor();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.2);
+    oscillator.onended = () => void ctx.close();
   }
 
   function startListening() {
@@ -369,13 +483,19 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
    * — the user just asked for this, so it's worth waiting the full
    * MAX_RECORD_MS for them to start talking. `mode: "followup"` is the
    * post-reply "still listening" window opened without the wake word —
-   * since nobody explicitly asked for this one, it gives up much sooner
+   * since nobody explicitly asked for this one, it gives up sooner
    * (FOLLOWUP_NO_SPEECH_TIMEOUT_MS) if nothing is said, discarding the
    * silent clip and falling back to wake-word-gated listening rather than
-   * paying a transcription round trip on dead air.
+   * paying a transcription round trip on dead air. It's also reused as the
+   * landing spot for a barge-in interruption (the user was already talking
+   * when it started, so it picks their speech up immediately rather than
+   * waiting out the timeout, and skips the chime below since they're
+   * already mid-sentence) — otherwise announced with a short chime, since
+   * nothing else tells the user this window is open.
    */
   async function beginRecording(mode: "wake" | "followup") {
     if (stoppedRef.current) return;
+    if (mode === "followup" && !interruptedRef.current) playListeningChime();
     setStatus("recording");
     setLastHeard(null);
     setLastSpoken(null);
@@ -475,11 +595,6 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
   async function handleRecordingComplete(blob: Blob) {
     if (stoppedRef.current) return;
     setStatus("processing");
-    // Only a clean turn (transcribed, answered, spoken) earns the no-wake-word
-    // follow-up window below — an empty transcript or a failed turn instead
-    // drops straight back to wake-word-gated listening, so a transient error
-    // can't chain into a loop of doomed follow-up attempts.
-    let turnSucceeded = false;
     try {
       const text = (await transcribeVoice(blob)).trim();
       if (!text) return;
@@ -487,31 +602,39 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
       const reply = await onCommandRef.current(text);
       setLastSpoken(reply);
       await speak(reply);
-      turnSucceeded = true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong with that voice command.");
     } finally {
-      if (!stoppedRef.current) {
-        if (turnSucceeded) {
-          void beginRecording("followup");
-        } else {
-          startListening();
-        }
-      }
+      // Open the follow-up window after *any* turn, success or failure — a
+      // transient transcription/network hiccup shouldn't force the user to
+      // repeat the wake word. It degrades gracefully on its own
+      // (FOLLOWUP_NO_SPEECH_TIMEOUT_MS) if nothing more is said.
+      if (!stoppedRef.current) void beginRecording("followup");
     }
   }
 
   async function speak(spokenText: string) {
     if (stoppedRef.current) return;
     setStatus("speaking");
+    interruptedRef.current = false;
+    startBargeInMonitor();
     try {
       // `spokenText` is already the short natural line built by
       // buildSpokenReply — this call just turns it into audio.
       const response = await openSpeechStream(spokenText);
       if (stoppedRef.current) return;
-      await playAudioResponse(response, () => stoppedRef.current);
+      await playAudioResponse(
+        response,
+        () => stoppedRef.current || interruptedRef.current,
+        (audio) => {
+          currentAudioRef.current = audio;
+        },
+      );
     } catch {
       // TTS request failed — the reply is still visible in the chat log, so just fall back to silence.
+    } finally {
+      stopBargeInMonitor();
+      currentAudioRef.current = null;
     }
   }
 
