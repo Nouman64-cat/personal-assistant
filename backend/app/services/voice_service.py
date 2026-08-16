@@ -11,27 +11,21 @@ from app.services.chat_service import ChatServiceError
 
 logger = logging.getLogger(__name__)
 
-# --- Deepgram (primary) ------------------------------------------------------
-# Faster and cheaper than the OpenAI equivalents below, so it's tried first
-# whenever DEEPGRAM_API_KEY is configured. Any failure — unset key, network
-# error, non-2xx response — falls back to OpenAI transparently; callers only
-# ever see ChatServiceError if *both* providers fail.
-DEEPGRAM_STT_MODEL = "nova-3"
-DEEPGRAM_TTS_MODEL = "aura-2-harmonia-en"  # "Empathetic, Clear, Calm, Confident" — fits the "Julie" persona
-DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen"
-DEEPGRAM_SPEAK_URL = "https://api.deepgram.com/v1/speak"
-
-# --- OpenAI (fallback) --------------------------------------------------------
+# --- OpenAI Voice (Primary) --------------------------------------------------
 TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 SPEECH_MODEL = "gpt-4o-mini-tts"
-SPEECH_VOICE = "shimmer"  # soft, soothing — a female-presenting voice for "Julie"
+SPEECH_VOICE = "coral"  # 🍊 Coral: A friendly, expressive, and slightly playful tone for casual/younger audiences
 SPEECH_INSTRUCTIONS = (
-    "Speak in a warm, upbeat, friendly tone — like a cheerful, energetic personal "
-    "assistant who's genuinely glad to hear from you, not formal or subservient. "
-    "Natural human conversational pacing — real breath pauses between phrases, "
-    "gentle rise and fall in pitch, unhurried but never sluggish. Never flat or "
-    "robotic."
+    "Speak in a friendly, expressive, and slightly playful tone that works well for casual "
+    "or younger audiences. Natural human conversational pacing — real breath pauses between phrases, "
+    "gentle rise and fall in pitch, cheerful, warm, and engaging. Never flat or robotic."
 )
+
+# --- Deepgram (Optional Fallback) --------------------------------------------
+DEEPGRAM_STT_MODEL = "nova-3"
+DEEPGRAM_TTS_MODEL = "aura-2-harmonia-en"
+DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen"
+DEEPGRAM_SPEAK_URL = "https://api.deepgram.com/v1/speak"
 
 
 def _deepgram_headers(**extra: str) -> dict[str, str]:
@@ -73,13 +67,13 @@ def _openai_transcribe(file_bytes: bytes, filename: str, content_type: str) -> s
 
 
 def transcribe_audio(file_bytes: bytes, filename: str, content_type: str) -> str:
-    if settings.DEEPGRAM_API_KEY:
-        try:
+    try:
+        return _openai_transcribe(file_bytes, filename, content_type)
+    except Exception:
+        if settings.DEEPGRAM_API_KEY:
+            logger.warning("OpenAI transcription failed; trying Deepgram fallback", exc_info=True)
             return _deepgram_transcribe(file_bytes, content_type)
-        except Exception:
-            logger.warning("Deepgram transcription failed; falling back to OpenAI", exc_info=True)
-
-    return _openai_transcribe(file_bytes, filename, content_type)
+        raise
 
 
 def _open_deepgram_speech_stream(text: str) -> Iterator[bytes]:
@@ -150,10 +144,10 @@ def _open_openai_speech_stream(text: str) -> Iterator[bytes]:
 
 
 def open_speech_stream(text: str) -> Iterator[bytes]:
-    if settings.DEEPGRAM_API_KEY:
-        try:
+    try:
+        return _open_openai_speech_stream(text)
+    except Exception:
+        if settings.DEEPGRAM_API_KEY:
+            logger.warning("OpenAI speech synthesis failed; trying Deepgram fallback", exc_info=True)
             return _open_deepgram_speech_stream(text)
-        except Exception:
-            logger.warning("Deepgram speech synthesis failed to open; falling back to OpenAI", exc_info=True)
-
-    return _open_openai_speech_stream(text)
+        raise
