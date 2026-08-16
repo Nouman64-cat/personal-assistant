@@ -141,3 +141,10 @@ export interface ShiftSettingsInput {
   timezone: string;
   buffer_minutes: number;
 }
+
+/** "wellness" fires while the user is in a blocking engagement (a break/hydration nudge); "growth" fires during open free time (a learning suggestion). See JulieRecommendationProvider.tsx. */
+export type RecommendationKind = "wellness" | "growth";
+
+export interface RecommendationResponse {
+  text: string;
+}

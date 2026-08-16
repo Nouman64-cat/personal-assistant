@@ -5,6 +5,7 @@ import "./globals.css";
 import AppHeader from "@/components/AppHeader";
 import { EngagementAlarmProvider } from "@/components/EngagementAlarmProvider";
 import JulieFace from "@/components/JulieFace";
+import { JulieRecommendationProvider } from "@/components/JulieRecommendationProvider";
 import MobileNav from "@/components/MobileNav";
 import Sidebar from "@/components/Sidebar";
 import { AppStateProvider } from "@/lib/appState";
@@ -37,17 +38,19 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <ChatStateProvider>
             <VoiceStateProvider>
               <EngagementAlarmProvider>
-                <div className="flex h-full flex-col md:flex-row">
-                  <Sidebar />
-                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    <AppHeader />
-                    <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
-                      {children}
-                    </main>
+                <JulieRecommendationProvider>
+                  <div className="flex h-full flex-col md:flex-row">
+                    <Sidebar />
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                      <AppHeader />
+                      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
+                        {children}
+                      </main>
+                    </div>
+                    <MobileNav />
                   </div>
-                  <MobileNav />
-                </div>
-                <JulieFace />
+                  <JulieFace />
+                </JulieRecommendationProvider>
               </EngagementAlarmProvider>
             </VoiceStateProvider>
           </ChatStateProvider>

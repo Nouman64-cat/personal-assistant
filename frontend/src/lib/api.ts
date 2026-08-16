@@ -6,6 +6,8 @@ import type {
   EngagementInput,
   FreeSlotsParams,
   FreeSlotsResponse,
+  RecommendationKind,
+  RecommendationResponse,
   ShiftSettings,
   ShiftSettingsInput,
 } from "@/lib/types";
@@ -187,5 +189,15 @@ export function updateShiftSettings(data: ShiftSettingsInput): Promise<ShiftSett
   return request<ShiftSettings>("/settings/shift", {
     method: "PUT",
     body: JSON.stringify(data),
+  });
+}
+
+// --- Recommendations ----------------------------------------------------------
+
+/** Generates a fresh proactive suggestion line — see JulieRecommendationProvider.tsx for when this is called. */
+export function getRecommendation(kind: RecommendationKind): Promise<RecommendationResponse> {
+  return request<RecommendationResponse>("/recommendations/", {
+    method: "POST",
+    body: JSON.stringify({ kind }),
   });
 }
