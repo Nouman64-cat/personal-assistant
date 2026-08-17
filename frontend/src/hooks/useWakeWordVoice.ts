@@ -97,10 +97,15 @@ function appendToSourceBuffer(sourceBuffer: SourceBuffer, chunk: Uint8Array): Pr
   });
 }
 
-async function playBlob(blob: Blob, onAudioElement: (audio: HTMLAudioElement | null) => void): Promise<void> {
+async function playBlob(
+  blob: Blob,
+  onAudioElement: (audio: HTMLAudioElement | null) => void,
+  onPlaybackStart: () => void,
+): Promise<void> {
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   onAudioElement(audio);
+  onPlaybackStart();
   await new Promise<void>((resolve) => {
     audio.onended = () => resolve();
     audio.onerror = () => resolve();
@@ -116,12 +121,17 @@ async function playBlob(blob: Blob, onAudioElement: (audio: HTMLAudioElement | n
  * for the whole clip, which was the single biggest source of "the reply
  * feels slow to start talking". Falls back to buffer-then-play if the
  * browser lacks MSE mp3 support. `isAborted` is polled between chunks so a
- * mid-stream "Julie" toggle-off stops playback promptly.
+ * mid-stream "Julie" toggle-off stops playback promptly. `onPlaybackStart`
+ * fires right as audio actually starts sounding — not before, since the
+ * caller uses it to arm barge-in detection and arming it any earlier would
+ * have the mic monitor watching for "interruptions" of audio that isn't
+ * playing yet (e.g. during the TTS network round trip).
  */
 async function playAudioResponse(
   response: Response,
   isAborted: () => boolean,
   onAudioElement: (audio: HTMLAudioElement | null) => void,
+  onPlaybackStart: () => void,
 ): Promise<void> {
   const canStream =
     typeof MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg") && response.body !== null;
@@ -129,7 +139,7 @@ async function playAudioResponse(
   if (!canStream) {
     const blob = await response.blob();
     if (isAborted()) return;
-    await playBlob(blob, onAudioElement);
+    await playBlob(blob, onAudioElement, onPlaybackStart);
     return;
   }
 
@@ -164,6 +174,7 @@ async function playAudioResponse(
         if (!playbackStarted) {
           playbackStarted = true;
           void audio.play().catch(() => {});
+          onPlaybackStart();
         }
       }
     }
@@ -626,7 +637,6 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
     if (stoppedRef.current) return;
     setStatus("speaking");
     interruptedRef.current = false;
-    startBargeInMonitor();
     try {
       // `spokenText` is already the short natural line built by
       // buildSpokenReply — this call just turns it into audio.
@@ -638,6 +648,11 @@ export function useWakeWordVoice({ onCommand }: UseWakeWordVoiceOptions): UseWak
         (audio) => {
           currentAudioRef.current = audio;
         },
+        // Arm barge-in only once audio is actually sounding — arming it
+        // during the TTS fetch/buffering above would let ambient mic noise
+        // with no Julie audio to "interrupt" get mistaken for one,
+        // aborting playback before or right as it starts.
+        startBargeInMonitor,
       );
     } catch {
       // TTS request failed — the reply is still visible in the chat log, so just fall back to silence.
