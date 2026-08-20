@@ -55,27 +55,37 @@ export function parseDateKey(key: string): Date {
   return new Date(year, (month ?? 1) - 1, day ?? 1);
 }
 
+/** date-fns v4 throws a `RangeError` on an Invalid Date instead of returning
+ * a placeholder string — a real risk here since every formatter below is fed
+ * timestamps parsed from backend data. A malformed one must degrade to a
+ * placeholder, not throw mid-render and take down whatever's above it. */
+function isValidDate(date: Date): boolean {
+  return !Number.isNaN(date.getTime());
+}
+
 export function formatTime(iso: string): string {
-  return format(parseNaiveIso(iso), "h:mm a");
+  const date = parseNaiveIso(iso);
+  return isValidDate(date) ? format(date, "h:mm a") : "—";
 }
 
 /** Same as `formatTime`, but for a `Date` that's already wall-clock-correct
  * (e.g. one built directly via the local Date constructor), skipping the
  * naive-ISO parse. */
 export function formatClockTime(date: Date): string {
-  return format(date, "h:mm a");
+  return isValidDate(date) ? format(date, "h:mm a") : "—";
 }
 
 export function formatDateTime(iso: string): string {
-  return format(parseNaiveIso(iso), "EEE, MMM d 'at' h:mm a");
+  const date = parseNaiveIso(iso);
+  return isValidDate(date) ? format(date, "EEE, MMM d 'at' h:mm a") : "—";
 }
 
 export function formatDayLabel(date: Date): string {
-  return format(date, "EEE, MMM d");
+  return isValidDate(date) ? format(date, "EEE, MMM d") : "—";
 }
 
 export function formatMonthLabel(date: Date): string {
-  return format(date, "MMMM yyyy");
+  return isValidDate(date) ? format(date, "MMMM yyyy") : "—";
 }
 
 export function formatDuration(minutes: number): string {

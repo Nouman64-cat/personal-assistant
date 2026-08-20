@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, CheckCircle2, X } from "lucide-react";
 
 import { useAppState } from "@/lib/appState";
@@ -12,6 +12,34 @@ import { cn, formatClockTime } from "@/lib/utils";
 import EngagementActionCard from "./EngagementActionCard";
 import FreeSlotsCard from "./FreeSlotsCard";
 import LookedUpEngagementsCard from "./LookedUpEngagementsCard";
+
+/**
+ * There's no error boundary anywhere else in the app, and this widget
+ * renders backend-sourced timestamps through date-fns, which throws on an
+ * Invalid Date instead of degrading gracefully. Without this boundary, a
+ * single malformed timestamp on a free-slot/conflict/engagement turn throws
+ * during render, propagates past `VoiceStateProvider` above `JulieFace` in
+ * the tree, unmounts it, and its cleanup effect hard-stops Julie's
+ * in-progress speech — i.e. a broken side panel would silently cut off the
+ * voice reply itself. Keyed by the caller on the message count so a fresh
+ * turn always gets a clean boundary instead of staying stuck hidden after
+ * one bad turn.
+ */
+class WidgetErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("Julie widget panel failed to render:", error);
+  }
+
+  render() {
+    return this.state.hasError ? null : this.props.children;
+  }
+}
 
 /** Only these phases count as Julie "getting active" — the wake-word-gated
  * `listening` phase stays a quiet header icon so the takeover doesn't fire
@@ -260,7 +288,13 @@ export default function JulieFace() {
     >
       <button
         type="button"
-        onClick={() => setDismissed(true)}
+        onClick={(event) => {
+          // Dismissing marks the overlay aria-hidden in this same render —
+          // move focus off the button first so the browser never has to
+          // hide a focused descendant from assistive tech.
+          event.currentTarget.blur();
+          setDismissed(true);
+        }}
         aria-label="Dismiss Julie"
         className="absolute right-5 top-5 rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white/90"
       >
@@ -304,7 +338,11 @@ export default function JulieFace() {
           )}
         </div>
 
-        {widgetMessage && <JulieWidgetPanel message={widgetMessage} shift={shift} />}
+        {widgetMessage && (
+          <WidgetErrorBoundary key={messages.length}>
+            <JulieWidgetPanel message={widgetMessage} shift={shift} />
+          </WidgetErrorBoundary>
+        )}
       </div>
     </div>
   );
